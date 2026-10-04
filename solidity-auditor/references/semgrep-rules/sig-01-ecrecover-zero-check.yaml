@@ -1,0 +1,129 @@
+rules:
+  - id: sig-01-ecrecover-missing-zero-check
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+            $SIGNER = ecrecover(...);
+            ...
+          }
+      - patterns:
+          - pattern: |
+              $SIGNER = ecrecover($HASH, $V, $R, $S)
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                require($SIGNER != address(0), ...);
+                ...
+                require($SIGNER == $EXPECTED, ...);
+                ...
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                if ($SIGNER == address(0)) { ... revert(...); ... }
+                ...
+                require($SIGNER == $EXPECTED, ...);
+                ...
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                require($SIGNER != address(0));
+                ...
+              }
+    message: |
+      SIG-01: Missing zero-address check on ecrecover() return value.
+
+      Vulnerability: The function calls ecrecover() and uses the returned address without verifying it is not address(0).
+      This allows invalid signatures to be accepted (all zeros hash to address(0)).
+
+      Proof: Found ecrecover() call at line $LINENUM without preceding require(signer != address(0)).
+
+      Fix: Add require(signer != address(0), "Invalid signature") immediately after ecrecover() call.
+
+      Reference: https://docs.openzeppelin.com/contracts/4.x/api/utils#ECDSA
+    languages: [solidity]
+    severity: HIGH
+    confidence: HIGH
+
+  - id: sig-01-ecrecover-zero-check-if-revert
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+            $SIGNER = ecrecover(...);
+            ...
+          }
+      - patterns:
+          - pattern: $SIGNER = ecrecover($HASH, $V, $R, $S)
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                require($SIGNER != address(0), ...);
+                ...
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                if ($SIGNER == address(0)) { ... revert(...); ... }
+                ...
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                if ($SIGNER != address(0)) { ...  }
+                ...
+              }
+    message: |
+      SIG-01: Missing zero-address guard on ecrecover() return.
+
+      The function calls ecrecover() without guarding the return value against address(0).
+
+      Common patterns that ARE properly guarded:
+      - require(signer != address(0), "...")
+      - if (signer == address(0)) revert()
+
+      Pattern found without guard: $SIGNER = ecrecover(...)
+
+      Fix: Add a guard immediately after ecrecover():
+        require(signer != address(0), "Invalid signature");
+    languages: [solidity]
+    severity: HIGH
+    confidence: MEDIUM
+
+  - id: sig-01-ecrecover-implicit-zero-check
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+            $SIGNER = ecrecover(...);
+            ...
+            require($SIGNER == $EXPECTED, ...);
+            ...
+          }
+      - pattern: $SIGNER = ecrecover($HASH, $V, $R, $S)
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            require($SIGNER != address(0), ...);
+            ...
+          }
+    message: |
+      SIG-01: ecrecover() return compared to expected address without explicit zero-check.
+
+      Vulnerability: The code requires signer == expected_address, but does NOT explicitly check signer != address(0).
+
+      This is vulnerable because:
+      - If ecrecover() returns address(0) (invalid signature), the require() will fail
+      - BUT the attacker might control expected_address initialization (e.g., if it's msg.sender initially)
+      - In rare cases, address(0) might be a valid signer in the protocol context (e.g., owner not yet set)
+
+      Explicit guard recommended:
+        require(signer != address(0), "Invalid signature");
+        require(signer == expectedSigner, "Signature mismatch");
+
+      Fix: Add explicit require(signer != address(0)) before require(signer == expected).
+    languages: [solidity]
+    severity: MEDIUM
+    confidence: MEDIUM

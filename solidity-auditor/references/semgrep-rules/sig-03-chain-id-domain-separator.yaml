@@ -1,0 +1,183 @@
+rules:
+  - id: sig-03-permit-missing-chainid
+    patterns:
+      - pattern-inside: |
+          function permit(...) {
+            ...
+            $DIGEST = keccak256(abi.encodePacked(...));
+            ...
+          }
+      - patterns:
+          - pattern: keccak256(abi.encodePacked(...))
+          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+          - pattern-not: keccak256(abi.encodePacked($VAR))
+            where: |
+              $VAR contains (chainid OR address(this) OR domainSeparator OR DOMAIN_SEPARATOR)
+    message: |
+      SIG-03: Missing chain-id or domain-separator binding in permit() signature digest.
+
+      Vulnerability: The permit() function computes a signature digest without including block.chainid or address(this).
+      This enables replay attacks:
+      - Attack vector 1 (Cross-chain replay): Mainnet permit can be replayed on Polygon fork
+      - Attack vector 2 (Proxy replay): Permit valid on proxy v1 can be replayed on proxy v2 at different address
+
+      Proof: Found keccak256(abi.encodePacked(...)) in permit() without block.chainid or address(this).
+
+      Fix: Use EIP712 domain separator that includes block.chainid and address(this):
+
+        bytes32 domainSeparator = keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256("TokenName"),
+            keccak256("1"),
+            block.chainid,
+            address(this)
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+
+      Reference: https://eips.ethereum.org/EIPS/eip-712
+    languages: [solidity]
+    severity: HIGH
+    confidence: HIGH
+
+  - id: sig-03-transfer-with-sig-missing-chainid
+    patterns:
+      - pattern-inside: |
+          function transferWithSig(...) {
+            ...
+            $DIGEST = keccak256(...);
+            ...
+          }
+      - patterns:
+          - pattern: keccak256(abi.encodePacked(...))
+          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+    message: |
+      SIG-03: Missing chain-id in transferWithSig() digest.
+
+      The function computes a signature digest without including block.chainid.
+      Vulnerable to cross-chain replay attacks (mainnet → sidechain).
+
+      Add block.chainid to keccak256() input.
+    languages: [solidity]
+    severity: HIGH
+    confidence: HIGH
+
+  - id: sig-03-execute-meta-transaction-missing-chainid
+    patterns:
+      - pattern-inside: |
+          function executeMetaTransaction(...) {
+            ...
+            $DIGEST = keccak256(...);
+            ...
+          }
+      - patterns:
+          - pattern: keccak256(abi.encodePacked(...))
+          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+    message: |
+      SIG-03: Missing chain-id in executeMetaTransaction() digest.
+
+      Cross-chain replay vulnerability: digest not bound to block.chainid.
+
+      Add block.chainid to keccak256() input.
+    languages: [solidity]
+    severity: HIGH
+    confidence: HIGH
+
+  - id: sig-03-recover-missing-chainid
+    patterns:
+      - pattern-inside: |
+          function recover(...) {
+            ...
+            $DIGEST = keccak256(...);
+            ...
+          }
+      - patterns:
+          - pattern: keccak256(abi.encodePacked(...))
+          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+    message: |
+      SIG-03: Missing chain-id in recover() signature verification.
+
+      Digest not bound to block.chainid. Vulnerable to cross-chain replay.
+
+      Add block.chainid to keccak256() arguments.
+    languages: [solidity]
+    severity: HIGH
+    confidence: HIGH
+
+  - id: sig-03-is-valid-signature-missing-chainid
+    patterns:
+      - pattern-inside: |
+          function isValidSignature(...) {
+            ...
+            $DIGEST = keccak256(...);
+            ...
+          }
+      - patterns:
+          - pattern: keccak256(abi.encodePacked(...))
+          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+    message: |
+      SIG-03: Missing chain-id in isValidSignature() hash computation.
+
+      Cross-chain replay risk: hash not bound to block.chainid or address(this).
+
+      Add block.chainid and address(this) to keccak256() input.
+    languages: [solidity]
+    severity: HIGH
+    confidence: MEDIUM
+
+  - id: sig-03-generic-keccak-missing-context
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+            $DIGEST = keccak256(abi.encodePacked(...));
+            ...
+            ecrecover($DIGEST, ...);
+            ...
+          }
+      - patterns:
+          - pattern: keccak256(abi.encodePacked(...))
+          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+          - metavariable-pattern:
+              metavariable: $F
+              patterns:
+                - pattern-regex: '(permit|transferWithSig|executeMetaTransaction|executeBySig|recover|isValidSignature)'
+    message: |
+      SIG-03: Signature digest missing chain-id or contract address binding.
+
+      Vulnerability: Digest computed without block.chainid or address(this).
+
+      This enables:
+      - Cross-chain replay (mainnet permit → polygon fork)
+      - Proxy replay (permit on proxy v1 → proxy v2)
+
+      Affected function: $F
+      Location: keccak256(abi.encodePacked(...)) at line $LINENUM
+
+      Fix: Include both block.chainid AND address(this) in the encoded data:
+
+        keccak256(abi.encodePacked(
+            "\x19\x01",
+            block.chainid,
+            address(this),
+            ... other fields ...
+        ))
+
+      Or use EIP712:
+
+        bytes32 domainSeparator = keccak256(abi.encode(
+            EIP712DOMAIN_TYPEHASH,
+            keccak256(bytes(name)),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(this)
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+    languages: [solidity]
+    severity: HIGH
+    confidence: MEDIUM
