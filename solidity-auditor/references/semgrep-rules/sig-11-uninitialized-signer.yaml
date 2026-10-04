@@ -1,0 +1,180 @@
+rules:
+  - id: sig-11-uninitialized-signer-ecrecover
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+            $SIGNER = ecrecover(...);
+            ...
+          }
+      - patterns:
+          - pattern: $SIGNER = ecrecover($HASH, $V, $R, $S)
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                $SIGNER = address(0);
+                ...
+                $SIGNER = ecrecover(...);
+                ...
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                address $SIGNER;
+                ...
+                $SIGNER = address(0);
+                ...
+                $SIGNER = ecrecover(...);
+                ...
+              }
+    message: |
+      SIG-11: Signer variable used without initialization guard.
+
+      Vulnerability: Variable that receives ecrecover() return value may be uninitialized
+      in some code paths, leading to default address(0) usage without explicit handling.
+
+      Risk: If $SIGNER is declared but not initialized to a default value before ecrecover(),
+      an exception path could leave it uninitialized, causing subtle bugs.
+
+      Proof: Found ecrecover() assignment to $SIGNER without prior initialization.
+
+      Recommendation: Explicitly initialize signer variable before use:
+        address signer = address(0);
+        signer = ecrecover(hash, v, r, s);
+
+      Or use constructor initialization in state variables.
+    languages: [solidity]
+    severity: MEDIUM
+    confidence: MEDIUM
+
+  - id: sig-11-uninitialized-state-signer
+    patterns:
+      - pattern-inside: |
+          contract $C {
+            ...
+            address public $SIGNER;
+            ...
+          }
+      - patterns:
+          - pattern-inside: |
+              function $F(...) {
+                ...
+                $SIGNER = ecrecover(...);
+                ...
+              }
+          - pattern-not-inside: |
+              function initialize(...) {
+                ...
+                $SIGNER = address(0);
+                ...
+              }
+          - pattern-not-inside: |
+              constructor(...) {
+                ...
+                $SIGNER = address(0);
+                ...
+              }
+    message: |
+      SIG-11: State variable signer not initialized in constructor or initializer.
+
+      Vulnerability: State variable $SIGNER can be used before being set, with default
+      value address(0), leading to unintended behavior.
+
+      Proof: State variable declaration found at top of contract without initialization,
+      and ecrecover() assigns to it at runtime without constructor/initializer guard.
+
+      Fix: Initialize in constructor or initializer:
+        constructor() {
+            signer = address(0);
+        }
+
+      Or use initializer pattern for upgradeable contracts:
+        function initialize(address _initialSigner) external initializer {
+            signer = _initialSigner != address(0) ? _initialSigner : msg.sender;
+        }
+    languages: [solidity]
+    severity: MEDIUM
+    confidence: MEDIUM
+
+  - id: sig-11-uninitialized-recovery-sender
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+            ecrecover(...);
+            ...
+          }
+      - patterns:
+          - pattern: |
+              ecrecover($HASH, $V, $R, $S)
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                address $VAR = ecrecover(...);
+                ...
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                $VAR = ecrecover(...);
+                require($VAR != address(0), ...);
+                ...
+              }
+    message: |
+      SIG-11: ecrecover() return value not captured or validated.
+
+      Vulnerability: ecrecover() call's return value is not stored or validated.
+      This can indicate:
+      1. Return value dropped (BUG: signer not recovered)
+      2. Return value implicitly cast/lost
+      3. Signer checked against uninitialized/wrong variable
+
+      Proof: ecrecover() call found without assignment or immediate validation.
+
+      Fix: Always capture and validate ecrecover() return value:
+        address signer = ecrecover(hash, v, r, s);
+        require(signer != address(0), "Invalid signature");
+        require(signer == expectedSigner, "Unauthorized");
+    languages: [solidity]
+    severity: HIGH
+    confidence: MEDIUM
+
+  - id: sig-11-signer-default-comparison
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+            require($SIGNER == $EXPECTED, ...);
+            ...
+          }
+      - patterns:
+          - pattern: require($SIGNER == $EXPECTED, ...)
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                require($SIGNER != address(0), ...);
+                require($SIGNER == $EXPECTED, ...);
+                ...
+              }
+          - pattern-not: |
+              require($SIGNER == address(0), ...)
+    message: |
+      SIG-11: Signer variable compared without explicit default-value check.
+
+      Vulnerability: Variable $SIGNER is compared to $EXPECTED without ensuring
+      $SIGNER is not the default value (address(0)).
+
+      If $SIGNER comes from ecrecover() or similar function that can return address(0),
+      and $EXPECTED is also address(0) (or uninitialized), the check passes when it shouldn't.
+
+      Proof: require($SIGNER == $EXPECTED) without prior require($SIGNER != address(0)).
+
+      Fix: Add explicit guard:
+        require(signer != address(0), "Invalid signature");
+        require(signer == expectedSigner, "Unauthorized");
+
+      NOT:
+        require(signer == expectedSigner, "Unauthorized");  // ❌ Missing guard
+    languages: [solidity]
+    severity: MEDIUM
+    confidence: MEDIUM
