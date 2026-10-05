@@ -15,22 +15,23 @@ rules:
                 ...
                 require($SIGNER != address(0), ...);
                 ...
-                require($SIGNER == $EXPECTED, ...);
-                ...
               }
           - pattern-not-inside: |
               function $F(...) {
                 ...
                 if ($SIGNER == address(0)) { ... revert(...); ... }
                 ...
-                require($SIGNER == $EXPECTED, ...);
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                if ($SIGNER == address(0)) { ... return ...; ... }
                 ...
               }
           - pattern-not-inside: |
               function $F(...) {
                 ...
-                require($SIGNER != address(0));
-                ...
+                return $SIGNER;
               }
     message: |
       SIG-01: Missing zero-address check on ecrecover() return value.
@@ -38,14 +39,20 @@ rules:
       Vulnerability: The function calls ecrecover() and uses the returned address without verifying it is not address(0).
       This allows invalid signatures to be accepted (all zeros hash to address(0)).
 
-      Proof: Found ecrecover() call at line $LINENUM without preceding require(signer != address(0)).
+      Proof: Found ecrecover() call at line $LINENUM without safe guard.
 
-      Fix: Add require(signer != address(0), "Invalid signature") immediately after ecrecover() call.
+      Safe patterns:
+      - require(signer != address(0), "...")
+      - if (signer == address(0)) revert()
+      - if (signer == address(0)) return false
+      - return signer; (caller responsibility)
+
+      Fix: Add one of the above patterns.
 
       Reference: https://docs.openzeppelin.com/contracts/4.x/api/utils#ECDSA
     languages: [solidity]
     severity: HIGH
-    confidence: HIGH
+    confidence: MEDIUM
 
   - id: sig-01-ecrecover-zero-check-if-revert
     patterns:
@@ -72,22 +79,35 @@ rules:
           - pattern-not-inside: |
               function $F(...) {
                 ...
+                if ($SIGNER == address(0)) { ... return ...; ... }
+                ...
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
                 if ($SIGNER != address(0)) { ...  }
                 ...
+              }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                return $SIGNER;
               }
     message: |
       SIG-01: Missing zero-address guard on ecrecover() return.
 
       The function calls ecrecover() without guarding the return value against address(0).
 
-      Common patterns that ARE properly guarded:
+      Safe patterns recognized:
       - require(signer != address(0), "...")
       - if (signer == address(0)) revert()
+      - if (signer == address(0)) return (false/0/etc)
+      - if (signer != address(0)) { ... } (positive guard)
+      - return signer; (caller responsibility)
 
-      Pattern found without guard: $SIGNER = ecrecover(...)
+      Pattern found without recognized guard: $SIGNER = ecrecover(...)
 
-      Fix: Add a guard immediately after ecrecover():
-        require(signer != address(0), "Invalid signature");
+      Fix: Add one of the safe patterns above.
     languages: [solidity]
     severity: HIGH
     confidence: MEDIUM
