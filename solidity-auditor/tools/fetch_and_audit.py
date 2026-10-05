@@ -179,7 +179,13 @@ def fetch_with_retry(address: str, max_retries: int = 3, backoff: float = 1.0) -
 
 
 def run_semgrep_audit(source: str, contract_path: str = "Contract.sol") -> Dict:
-    """Run Semgrep SIG-* rules on source code."""
+    """Run Semgrep SIG-* rules on source code.
+
+    Uses validated custom Semgrep rules from solidity-auditor/references/semgrep-rules/
+    - SIG-01: ecrecover zero-address check
+    - SIG-03: chain-id domain separator binding
+    - SIG-11: uninitialized signer (research-only)
+    """
     import subprocess
     import tempfile
 
@@ -195,25 +201,35 @@ def run_semgrep_audit(source: str, contract_path: str = "Contract.sol") -> Dict:
             f.write(source)
             temp_path = f.name
 
+        # Locate rule files relative to this script
+        rules_dir = Path(__file__).parent.parent / "references" / "semgrep-rules"
+
+        rules = {
+            'SIG-01': rules_dir / "sig-01-ecrecover-zero-check.yaml",
+            'SIG-03': rules_dir / "sig-03-chain-id-domain-separator.yaml",
+            'SIG-11': rules_dir / "sig-11-uninitialized-signer.yaml",
+        }
+
         # Run Semgrep (if installed)
         try:
-            result = subprocess.run(
-                ['semgrep', '--config=p/solidity', temp_path, '--json'],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            for sig_type, rule_file in rules.items():
+                if not rule_file.exists():
+                    print(f"⚠️  Rule file not found: {rule_file}", file=sys.stderr)
+                    continue
 
-            if result.returncode == 0 or result.returncode == 1:  # 1 = findings found
-                semgrep_output = json.loads(result.stdout)
-                for finding in semgrep_output.get('results', []):
-                    rule_id = finding.get('check_id', '')
-                    if 'sig-01' in rule_id.lower():
-                        findings['SIG-01'].append(finding)
-                    elif 'sig-03' in rule_id.lower():
-                        findings['SIG-03'].append(finding)
-                    elif 'sig-11' in rule_id.lower():
-                        findings['SIG-11'].append(finding)
+                result = subprocess.run(
+                    ['semgrep', f'--config={rule_file}', temp_path, '--json'],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+
+                if result.returncode == 0 or result.returncode == 1:  # 1 = findings found
+                    try:
+                        semgrep_output = json.loads(result.stdout)
+                        findings[sig_type] = semgrep_output.get('results', [])
+                    except json.JSONDecodeError:
+                        print(f"⚠️  Failed to parse Semgrep output for {sig_type}", file=sys.stderr)
         except FileNotFoundError:
             print("⚠️  semgrep not installed; skipping static analysis", file=sys.stderr)
         except Exception as e:
@@ -321,18 +337,28 @@ def audit_contract(address: str, cache_dir: str = "./cache") -> Dict:
     print(f"🔬 Running Semgrep audits...", file=sys.stderr)
     semgrep_findings = run_semgrep_audit(source)
 
-    # Step 5: Aggregate findings
+    # Step 5: Aggregate findings into standardized format
     findings = []
     for check_id, check_findings in semgrep_findings.items():
         for finding in check_findings:
+            extra = finding.get('extra', {})
+
+            # Extract severity and confidence from Semgrep JSON
+            severity = extra.get('severity', 'MEDIUM').upper()
+            confidence = extra.get('confidence', 'MEDIUM').upper()
+
+            # First line of message is the title
+            message = extra.get('message', f'{check_id} finding')
+            title = message.split('\n')[0] if message else f'{check_id} finding'
+
             aggregated = {
                 'checkId': check_id,
-                'severity': 'HIGH' if 'HIGH' in str(finding).upper() else 'MEDIUM',
-                'confidence': 'HIGH',
-                'title': finding.get('extra', {}).get('message', f'{check_id} finding'),
-                'description': finding.get('message', ''),
+                'severity': severity,
+                'confidence': confidence,
+                'title': title,
+                'description': message,
                 'location': {
-                    'file': finding.get('path', ''),
+                    'file': finding.get('path', 'Contract.sol'),
                     'line': finding.get('start', {}).get('line', 0)
                 }
             }
