@@ -1,0 +1,31 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T20:39:23.397217+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0xb9d1b6f9794cee6ea127efa62faa631cd072279c",
+    "symbol": "CAKE",
+    "name": "CAKE",
+    "implementationName": "contracts/CAKE",
+    "marketCapUsd": 111279.0,
+    "liquidityUsd": 30589.91,
+    "proxy": {
+      "isProxy": false,
+      "type": null,
+      "implementation": null
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

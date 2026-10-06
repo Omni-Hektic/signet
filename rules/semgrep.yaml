@@ -1,0 +1,88 @@
+rules:
+  - id: bsc-sig01-ecrecover-missing-zero-check
+    languages: [solidity]
+    severity: ERROR
+    message: >-
+      ecrecover returns address(0) on malformed signatures. The recovered address
+      must be checked against address(0) before authorization or assignment.
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+          }
+      - pattern-either:
+          # Form 1: require equality check
+          - pattern: |
+              address $SIGNER = ecrecover($HASH, $V, $R, $S);
+              ...
+              require($SIGNER == $EXPECTED, ...);
+          # Form 2: inline ecrecover check
+          - pattern: require(ecrecover(...) == $EXPECTED, ...);
+          # Form 3: if comparison
+          - pattern: |
+              address $SIGNER = ecrecover($HASH, $V, $R, $S);
+              ...
+              if ($SIGNER == $EXPECTED) { ... }
+          # Form 4: if mismatch revert
+          - pattern: |
+              address $SIGNER = ecrecover($HASH, $V, $R, $S);
+              ...
+              if ($SIGNER != $EXPECTED) { revert(...); }
+      # Exclude safe comparisons against msg.sender (cannot be address(0))
+      - pattern-not: |
+          address $SIGNER = ecrecover(...);
+          ...
+          require($SIGNER == msg.sender, ...);
+      - pattern-not: require(ecrecover(...) == msg.sender, ...);
+      - pattern-not: |
+          address $SIGNER = ecrecover(...);
+          ...
+          if ($SIGNER == msg.sender) { ... }
+      - pattern-not: |
+          address $SIGNER = ecrecover(...);
+          ...
+          if ($SIGNER != msg.sender) { revert(...); }
+      # Exclude explicit zero checks
+      - pattern-not-inside: |
+          require($SIGNER != address(0), ...);
+          ...
+      - pattern-not-inside: |
+          if ($SIGNER == address(0)) { revert(...); }
+          ...
+      - pattern-not-inside: |
+          if ($SIGNER == address(0)) {
+            return ...;
+          }
+          ...
+      - pattern-not-inside: |
+          if ($SIGNER == address(0)) {
+            ...
+          }
+          ...
+      - pattern-not: |
+          address $SIGNER = ecrecover(...);
+          ...
+          if ($SIGNER == address(0)) { ... }
+
+  - id: bsc-sig03-missing-chainid-domain-separator
+    languages: [solidity]
+    severity: WARNING
+    message: >-
+      Digest calculation in signature-verification flow lacks block.chainid or a domain
+      separator, permitting cross-chain or cross-contract signature replay attacks.
+    patterns:
+      - pattern-inside: |
+          function $F(...) {
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $F
+          regex: (?i)(permit|transferWithSig|transferProxy|executeMetaTransaction|executeBySig|recover|isValidSignature)
+      - pattern: keccak256(abi.encodePacked(...))
+      - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+      - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern-not: keccak256(abi.encodePacked("\x19\x01", ...))
+      - pattern-not: keccak256(abi.encodePacked(..., _domainSeparator(), ...))
+      - pattern-not: keccak256(abi.encodePacked(..., _domainSeparator, ...))
+      - pattern-not: keccak256(abi.encodePacked(..., DOMAIN_SEPARATOR, ...))
+

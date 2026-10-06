@@ -1,0 +1,31 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T20:39:43.294018+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x0efb5fd2402a0967b92551d6af54de148504a115",
+    "symbol": "WBNB",
+    "name": "Wrapped BNB",
+    "implementationName": "WBNB",
+    "marketCapUsd": 114305.0,
+    "liquidityUsd": 28482.77,
+    "proxy": {
+      "isProxy": false,
+      "type": null,
+      "implementation": null
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

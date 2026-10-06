@@ -1,0 +1,31 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T20:38:40.507504+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0xcc722b1e06c73a3b82e7d53752d67c8f1b3d7777",
+    "symbol": "\u5e01\u5b89\u4e16\u754c",
+    "name": "\u5e01\u5b89\u4e16\u754c",
+    "implementationName": "MultiFileContract",
+    "marketCapUsd": 339569.0,
+    "liquidityUsd": 60997.77,
+    "proxy": {
+      "isProxy": true,
+      "type": "EIP-1167",
+      "implementation": "0x024f18294970b5c76c0691b87f138a0317156422"
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

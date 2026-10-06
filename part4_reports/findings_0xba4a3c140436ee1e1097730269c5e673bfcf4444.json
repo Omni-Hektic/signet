@@ -1,0 +1,31 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T20:42:21.874357+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0xba4a3c140436ee1e1097730269c5e673bfcf4444",
+    "symbol": "BSC",
+    "name": "Bad Silly Cat",
+    "implementationName": "MultiFileContract",
+    "marketCapUsd": 4557.0,
+    "liquidityUsd": 8916.96,
+    "proxy": {
+      "isProxy": false,
+      "type": null,
+      "implementation": null
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

@@ -1,0 +1,41 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T20:38:21.678712+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x3b4cbdb0a05d08638d6c11a79d0455fb9ffa65ff",
+    "symbol": "SHIELD",
+    "name": "Shield",
+    "implementationName": "Unverified",
+    "marketCapUsd": 227337.0,
+    "liquidityUsd": 63787.13,
+    "proxy": {
+      "isProxy": false,
+      "type": null,
+      "implementation": null
+    },
+    "sourceVerified": false
+  },
+  "findings": [
+    {
+      "checkId": "UNVERIFIED_SOURCE",
+      "severity": "INFO",
+      "confidence": "LOW",
+      "status": "UNVERIFIED",
+      "title": "Contract source code is unverified",
+      "description": "The contract bytecode is deployed on BSC without verified source code on BscScan.",
+      "action": "MANUAL_REVIEW"
+    }
+  ]
+}

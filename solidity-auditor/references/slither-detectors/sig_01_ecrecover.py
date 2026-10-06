@@ -1,130 +1,129 @@
+#!/usr/bin/env python3
 """
-Slither Detector: SIG-01 Missing Zero-Address Check on ecrecover()
+SIG-01: Missing Zero-Address Check on ecrecover() Result
 
-Detects: Missing require(signer != address(0)) after ecrecover() calls.
-
-This detector extends Slither's built-in ecrecover detector to catch the common
-pattern where ecrecover() return value is used without validating it's not address(0).
-
-Usage:
-  slither contract.sol --detect sig-01-ecrecover-zero-check
+Detects ecrecover() calls without explicit guard against address(0).
+Walks CFG forward from each ecrecover to find Binary comparisons.
 """
 
-from typing import List, Set
-from slither.core.contract import Contract
-from slither.core.function import Function
-from slither.core.cfg.node import Node, NodeType
 from slither.detectors.abstract_detector import AbstractDetector, DetectorClassification
-from slither.slithir.operations import Call, Condition
-from slither.slithir.variables import TmpVariable, StateIRVariable
-from slither.core.solidity_types import ElementaryType
+from slither.slithir.operations import SolidityCall, Binary, BinaryType
+from slither.slithir.variables import Constant
 
 
-class EcrecoverZeroCheck(AbstractDetector):
+class SIG01EcrecoverZeroCheck(AbstractDetector):
     """
-    Detects ecrecover() calls without zero-address validation.
+    Detects missing zero-address check on ecrecover() results.
 
-    SIG-01: Vulnerability when:
-    1. Contract calls ecrecover(hash, v, r, s)
-    2. Return value is stored in variable (signer)
-    3. Variable is used in comparison (require/if) without checking != address(0)
-
-    Safe patterns:
-    - require(signer != address(0), "Invalid signature")
-    - if (signer == address(0)) revert()
-    - Any explicit address(0) check before use
+    Ecrecover returns address(0) for invalid signatures. Without explicit checking,
+    this can bypass access controls.
     """
 
     ARGUMENT = "sig-01-ecrecover-zero-check"
-    HELP = "ecrecover() return value not validated against address(0)"
+    HELP = "Missing zero-address check on ecrecover() result"
     IMPACT = DetectorClassification.HIGH
     CONFIDENCE = DetectorClassification.HIGH
+    WIKI_TITLE = "SIG-01: Missing zero-address check on ecrecover result"
+    WIKI_DESCRIPTION = "Detects ecrecover() calls without explicit guard against address(0), which is returned for invalid signatures."
+    WIKI_EXPLOIT_SCENARIO = "An attacker provides an invalid signature (random v, r, s). ecrecover returns address(0). If the code doesn't check for this, the address(0) comparison may incorrectly pass or bypass access controls."
+    WIKI_RECOMMENDATION = "Always validate that recovered address is not address(0) before using it. Example: require(recovered != address(0), 'Invalid signature');"
 
-    def _find_zero_check_in_function(self, function: Function, target_var) -> bool:
-        """Check if target_var has an explicit zero-address check in the function."""
+    def _detect(self):
+        results = []
+        findings_dedup = set()  # Dedup by node object id, not key tuple
 
-        zero_address_checks = []
+        for contract in self.compilation_unit.contracts:
+            # Only check functions declared in this contract (not inherited)
+            for function in contract.functions_and_modifiers_declared:
+                # Step 1: Find all ecrecover() calls
+                ecrecover_calls = []  # List of (node, ir) for each ecrecover
 
+                for node in function.nodes:
+                    for ir in node.irs:
+                        if isinstance(ir, SolidityCall):
+                            if ir.function.name == "ecrecover":
+                                if ir.lvalue:
+                                    ecrecover_calls.append((node, ir))
+
+                # Step 2: For each ecrecover, walk CFG to find zero-check
+                for ecrecover_node, ecrecover_ir in ecrecover_calls:
+                    recovered_var = ecrecover_ir.lvalue
+                    node_id = id(ecrecover_node)
+
+                    if node_id in findings_dedup:
+                        continue
+
+                    # Walk CFG from ecrecover onwards
+                    has_zero_check = self._find_zero_check(function, recovered_var)
+
+                    if not has_zero_check:
+                        findings_dedup.add(node_id)
+                        results.append(self.generate_result(
+                            [ecrecover_node],
+                            f"Missing zero-address check on ecrecover() result in {function.name}",
+                            contract=contract
+                        ))
+
+        return results
+
+    def _find_zero_check(self, function, recovered_var):
+        """
+        Walk the function's CFG, looking for Binary IR where:
+        - The binary op involves recovered_var (ir.read contains it)
+        - The op type is EQUAL or NOT_EQUAL
+        - The comparison guards against address(0) or msg.sender
+        """
         for node in function.nodes:
             for ir in node.irs:
-                # Look for patterns that validate against zero
-                # Pattern 1: require(var != 0) or require(var != address(0))
-                if "require" in str(node):
-                    node_str = str(node)
-                    if target_var in node_str and ("!= 0" in node_str or "!= address(0)" in node_str):
-                        zero_address_checks.append(node)
+                if not isinstance(ir, Binary):
+                    continue
 
-                # Pattern 2: if (var == address(0)) revert()
-                if "if" in str(node) and target_var in str(node):
-                    # Check if this is a zero check
-                    if "== 0" in str(node) or "== address(0)" in str(node):
-                        # Check if followed by revert
-                        for successor in node.sons:
-                            if "revert" in str(successor):
-                                zero_address_checks.append(node)
+                # Check if recovered_var is read by this binary operation
+                if recovered_var not in ir.read:
+                    continue
 
-        return len(zero_address_checks) > 0
+                # Check for safe comparison patterns
+                operands = ir.operands
+                if len(operands) != 2:
+                    continue
 
-    def _trace_variable_usage(self, function: Function, var, node_start: Node) -> List[Node]:
-        """Trace where a variable is used after ecrecover() call."""
-        uses = []
+                left, right = operands
+                op_type = ir.type
 
-        for node in function.nodes:
-            for ir in node.irs:
-                # Check if this IR reads the variable
-                if hasattr(ir, 'read') and ir.read:
-                    for read_var in ir.read:
-                        if read_var == var or str(read_var) == str(var):
-                            uses.append(node)
+                # Pattern 1: recovered_var != address(0) or address(0) != recovered_var
+                # This guards against zero
+                if op_type in (BinaryType.NOT_EQUAL, BinaryType.DIFF):
+                    if left == recovered_var and self._is_address_zero(right):
+                        return True
+                    if right == recovered_var and self._is_address_zero(left):
+                        return True
 
-        return uses
-
-    def _check_ecrecover_call(self, node: Node, function: Function) -> bool:
-        """
-        Check if a node contains an ecrecover() call.
-        Returns True if call is unsafe (no zero-check), False if safe.
-        """
-
-        for ir in node.irs:
-            # Look for Call operations to ecrecover
-            if isinstance(ir, Call):
-                # Check if this is calling ecrecover
-                if hasattr(ir, 'function') and ir.function and 'ecrecover' in str(ir.function).lower():
-                    # Found ecrecover call
-                    # Now check if return value is validated
-
-                    # Get the return variable
-                    if hasattr(ir, 'lvalue') and ir.lvalue:
-                        return_var = ir.lvalue
-
-                        # Check if there's a zero-address check for this variable
-                        has_check = self._find_zero_check_in_function(function, return_var)
-
-                        # If no explicit check found, flag as vulnerable
-                        return not has_check
+                # Pattern 2: recovered_var == msg.sender or msg.sender == recovered_var
+                # msg.sender is never address(0), so this is implicitly safe
+                if op_type == BinaryType.EQUAL:
+                    if left == recovered_var and self._is_msg_sender(right):
+                        return True
+                    if right == recovered_var and self._is_msg_sender(left):
+                        return True
 
         return False
 
-    def detect(self) -> List:
-        """Main detection function."""
-        results = []
+    def _is_address_zero(self, value):
+        """Check if a value represents address(0) or 0."""
+        if value is None:
+            return False
 
-        for contract in self.compilation_unit.contracts:
-            for function in contract.functions_and_modifiers_declared:
-                for node in function.nodes:
-                    is_vulnerable = self._check_ecrecover_call(node, function)
+        # Constant 0
+        if isinstance(value, Constant):
+            return value.value == 0
 
-                    if is_vulnerable:
-                        # Generate finding
-                        finding = {
-                            'contract': contract.name,
-                            'function': function.name,
-                            'line': node.source_mapping.start,
-                            'node': node,
-                            'severity': 'HIGH',
-                            'confidence': 'HIGH',
-                            'message': f"SIG-01: ecrecover() return value in {function.name}() not validated against address(0)"
-                        }
-                        results.append(finding)
+        # String representation check
+        val_str = str(value).lower().strip()
+        return val_str in ("0", "0x0", "0x00", "address(0)")
 
-        return results
+    def _is_msg_sender(self, value):
+        """Check if a value is msg.sender."""
+        if value is None:
+            return False
+        val_str = str(value).lower().strip()
+        return val_str == "msg.sender"

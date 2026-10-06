@@ -4,16 +4,12 @@ rules:
       - pattern-inside: |
           function permit(...) {
             ...
-            $DIGEST = keccak256(abi.encodePacked(...));
-            ...
           }
-      - patterns:
-          - pattern: keccak256(abi.encodePacked(...))
-          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
-          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
-          - pattern-not: keccak256(abi.encodePacked($VAR))
-            where: |
-              $VAR contains (chainid OR address(this) OR domainSeparator OR DOMAIN_SEPARATOR)
+      - pattern: keccak256(abi.encodePacked(...))
+      - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+      - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern-not: keccak256(abi.encodePacked("\x19\x01", ...))
+      - pattern-not: keccak256(abi.encodePacked(..., _domainSeparator(), ...))
     message: |
       SIG-03: Missing chain-id or domain-separator binding in permit() signature digest.
 
@@ -45,13 +41,12 @@ rules:
       - pattern-inside: |
           function transferWithSig(...) {
             ...
-            $DIGEST = keccak256(...);
-            ...
           }
-      - patterns:
-          - pattern: keccak256(abi.encodePacked(...))
-          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
-          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern: keccak256(abi.encodePacked(...))
+      - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+      - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern-not: keccak256(abi.encodePacked("\x19\x01", ...))
+      - pattern-not: keccak256(abi.encodePacked(..., _domainSeparator(), ...))
     message: |
       SIG-03: Missing chain-id in transferWithSig() digest.
 
@@ -68,13 +63,12 @@ rules:
       - pattern-inside: |
           function executeMetaTransaction(...) {
             ...
-            $DIGEST = keccak256(...);
-            ...
           }
-      - patterns:
-          - pattern: keccak256(abi.encodePacked(...))
-          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
-          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern: keccak256(abi.encodePacked(...))
+      - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+      - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern-not: keccak256(abi.encodePacked("\x19\x01", ...))
+      - pattern-not: keccak256(abi.encodePacked(..., _domainSeparator(), ...))
     message: |
       SIG-03: Missing chain-id in executeMetaTransaction() digest.
 
@@ -90,13 +84,12 @@ rules:
       - pattern-inside: |
           function recover(...) {
             ...
-            $DIGEST = keccak256(...);
-            ...
           }
-      - patterns:
-          - pattern: keccak256(abi.encodePacked(...))
-          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
-          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern: keccak256(abi.encodePacked(...))
+      - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+      - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern-not: keccak256(abi.encodePacked("\x19\x01", ...))
+      - pattern-not: keccak256(abi.encodePacked(..., _domainSeparator(), ...))
     message: |
       SIG-03: Missing chain-id in recover() signature verification.
 
@@ -112,13 +105,12 @@ rules:
       - pattern-inside: |
           function isValidSignature(...) {
             ...
-            $DIGEST = keccak256(...);
-            ...
           }
-      - patterns:
-          - pattern: keccak256(abi.encodePacked(...))
-          - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
-          - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern: keccak256(abi.encodePacked(...))
+      - pattern-not: keccak256(abi.encodePacked(..., block.chainid, ...))
+      - pattern-not: keccak256(abi.encodePacked(..., address(this), ...))
+      - pattern-not: keccak256(abi.encodePacked("\x19\x01", ...))
+      - pattern-not: keccak256(abi.encodePacked(..., _domainSeparator(), ...))
     message: |
       SIG-03: Missing chain-id in isValidSignature() hash computation.
 

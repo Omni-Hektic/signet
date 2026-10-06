@@ -33,6 +33,14 @@ rules:
                 ...
                 return $SIGNER;
               }
+          - pattern-not-inside: |
+              function $F(...) {
+                ...
+                require($EXPECTED != address(0), ...);
+                ...
+                $SIGNER = ecrecover(...);
+                ...
+              }
     message: |
       SIG-01: Missing zero-address check on ecrecover() return value.
 
@@ -61,6 +69,8 @@ rules:
             ...
             $SIGNER = ecrecover(...);
             ...
+            if ($SIGNER == address(0)) { ... revert(...); ... }
+            ...
           }
       - patterns:
           - pattern: $SIGNER = ecrecover($HASH, $V, $R, $S)
@@ -73,25 +83,10 @@ rules:
           - pattern-not-inside: |
               function $F(...) {
                 ...
-                if ($SIGNER == address(0)) { ... revert(...); ... }
+                require($EXPECTED != address(0), ...);
                 ...
-              }
-          - pattern-not-inside: |
-              function $F(...) {
+                $SIGNER = ecrecover(...);
                 ...
-                if ($SIGNER == address(0)) { ... return ...; ... }
-                ...
-              }
-          - pattern-not-inside: |
-              function $F(...) {
-                ...
-                if ($SIGNER != address(0)) { ...  }
-                ...
-              }
-          - pattern-not-inside: |
-              function $F(...) {
-                ...
-                return $SIGNER;
               }
     message: |
       SIG-01: Missing zero-address guard on ecrecover() return.
@@ -127,6 +122,14 @@ rules:
           function $F(...) {
             ...
             require($SIGNER != address(0), ...);
+            ...
+          }
+      - pattern-not-inside: |
+          function $F(...) {
+            ...
+            require($EXPECTED != address(0), ...);
+            ...
+            $SIGNER = ecrecover(...);
             ...
           }
     message: |

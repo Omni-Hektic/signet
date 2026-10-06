@@ -1,0 +1,31 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T20:38:57.786543+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0xda2fd814da34a489051c3471c0169c936aa37777",
+    "symbol": "WISP",
+    "name": "Wisp",
+    "implementationName": "MultiFileContract",
+    "marketCapUsd": 197378.0,
+    "liquidityUsd": 45838.77,
+    "proxy": {
+      "isProxy": true,
+      "type": "EIP-1167",
+      "implementation": "0x024f18294970b5c76c0691b87f138a0317156422"
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

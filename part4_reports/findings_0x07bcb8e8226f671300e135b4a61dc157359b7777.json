@@ -1,0 +1,31 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T20:37:47.513683+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x07bcb8e8226f671300e135b4a61dc157359b7777",
+    "symbol": "hooks",
+    "name": "pickhooks",
+    "implementationName": "MultiFileContract",
+    "marketCapUsd": 366020.0,
+    "liquidityUsd": 68861.3,
+    "proxy": {
+      "isProxy": true,
+      "type": "EIP-1167",
+      "implementation": "0x024f18294970b5c76c0691b87f138a0317156422"
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

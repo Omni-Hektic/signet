@@ -1,0 +1,31 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T20:37:12.121313+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x556e0fea0bad640bc266a824e8b8a81dcc4c6108",
+    "symbol": "BROWNIE",
+    "name": "CZ's Dog",
+    "implementationName": "Token",
+    "marketCapUsd": 112592.0,
+    "liquidityUsd": 74746.53,
+    "proxy": {
+      "isProxy": false,
+      "type": null,
+      "implementation": null
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

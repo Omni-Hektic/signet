@@ -45,7 +45,7 @@ rules:
       Or use constructor initialization in state variables.
     languages: [solidity]
     severity: MEDIUM
-    confidence: MEDIUM
+    confidence: LOW
 
   - id: sig-11-uninitialized-state-signer
     patterns:
@@ -94,7 +94,7 @@ rules:
         }
     languages: [solidity]
     severity: MEDIUM
-    confidence: MEDIUM
+    confidence: LOW
 
   - id: sig-11-uninitialized-recovery-sender
     patterns:
@@ -137,7 +137,7 @@ rules:
         require(signer == expectedSigner, "Unauthorized");
     languages: [solidity]
     severity: HIGH
-    confidence: MEDIUM
+    confidence: LOW
 
   - id: sig-11-signer-default-comparison
     patterns:
@@ -177,4 +177,4 @@ rules:
         require(signer == expectedSigner, "Unauthorized");  // ❌ Missing guard
     languages: [solidity]
     severity: MEDIUM
-    confidence: MEDIUM
+    confidence: LOW

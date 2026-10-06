@@ -1,0 +1,35 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-06T18:47:00.000000+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x6331bf8d601f0d7f0d2101772af5137c418c4444",
+    "proxy": {
+      "isProxy": false,
+      "type": null,
+      "implementation": null
+    }
+  },
+  "findings": [
+    {
+      "checkId": "UNVERIFIED_SOURCE",
+      "severity": "INFO",
+      "confidence": "LOW",
+      "status": "UNVERIFIED",
+      "title": "Contract source code is unverified",
+      "description": "The contract bytecode is deployed on BSC without verified source code on BscScan.",
+      "action": "MANUAL_REVIEW"
+    }
+  ]
+}

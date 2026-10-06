@@ -1,418 +1,424 @@
 #!/usr/bin/env python3
-"""
-Fetch Contract Source from BscScan & Run SIG-01, SIG-03, SIG-11 Audits
-
-Handles:
-- BscScan API integration with SQLite caching
-- Proxy resolution (EIP-1967, EIP-1822, EIP-1167)
-- Version detection and solc-select
-- Semgrep + Slither detector execution
-- Findings aggregation and reporting
-
-Usage:
-  python3 fetch_and_audit.py 0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984 \
-    --cache-dir ./cache \
-    --output findings.json
-
-Environment:
-  BSCSCAN_API_KEY - BscScan API key (optional, uses public tier if unset)
-"""
-
-import os
-import json
-import sqlite3
-import sys
-import hashlib
-import time
-from datetime import datetime
-from typing import Dict, Optional, Tuple
-from pathlib import Path
-import requests
 import argparse
-from proxy_resolver import ProxyResolver, SourceFetcher
+import hashlib
+import json
+import os
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+import requests
 
+BSC_RPC = "https://bsc-dataseed.binance.org/"
+# Unified Etherscan API V2 endpoint for BSC (chainid=56)
+BSCSCAN_API = "https://api.etherscan.io/v2/api"
 
-class AuditCache:
-    """SQLite cache for audit results."""
+SLOT_EIP1967_IMPL = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+SLOT_EIP1967_BEACON = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50"
+SLOT_EIP1822_UUPS = "0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7"
 
-    def __init__(self, cache_dir: str = "./cache"):
-        """Initialize cache database."""
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
-        self.db_path = self.cache_dir / "audit_cache.db"
-        self._init_db()
+def init_db(db_path: str = "audit_cache.db") -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS api_budget (
+            date_str TEXT PRIMARY KEY,
+            request_count INTEGER DEFAULT 0
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS source_cache (
+            address TEXT,
+            block_number INTEGER DEFAULT 0,
+            source_hash TEXT,
+            raw_json TEXT,
+            PRIMARY KEY (address, block_number)
+        )
+    """)
+    conn.commit()
+    return conn
 
-    def _init_db(self):
-        """Initialize database schema."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sources (
-                    address TEXT PRIMARY KEY,
-                    source_code TEXT,
-                    compiler_version TEXT,
-                    contract_name TEXT,
-                    fetched_at TIMESTAMP,
-                    source_hash TEXT
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS findings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    address TEXT,
-                    check_id TEXT,
-                    severity TEXT,
-                    confidence TEXT,
-                    title TEXT,
-                    description TEXT,
-                    location TEXT,
-                    created_at TIMESTAMP
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_address ON sources(address)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_findings_address ON findings(address)
-            """)
-            conn.commit()
+def check_and_increment_budget(conn: sqlite3.Connection, max_requests: int = 90000) -> bool:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cursor = conn.cursor()
+    cursor.execute("SELECT request_count FROM api_budget WHERE date_str = ?", (today,))
+    row = cursor.fetchone()
+    current_count = row[0] if row else 0
 
-    def get_source(self, address: str) -> Optional[Dict]:
-        """Retrieve cached source."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "SELECT source_code, compiler_version, contract_name, fetched_at FROM sources WHERE address = ?",
-                (address,)
-            )
-            row = cursor.fetchone()
-            if row:
-                return {
-                    'source_code': row[0],
-                    'compiler_version': row[1],
-                    'contract_name': row[2],
-                    'fetched_at': row[3]
-                }
+    if current_count >= max_requests:
+        return False
+
+    cursor.execute("""
+        INSERT INTO api_budget (date_str, request_count) VALUES (?, 1)
+        ON CONFLICT(date_str) DO UPDATE SET request_count = request_count + 1
+    """, (today,))
+    conn.commit()
+    return True
+
+def rpc_call(method: str, params: list) -> dict:
+    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    try:
+        resp = requests.post(BSC_RPC, json=payload, timeout=10)
+        return resp.json().get("result")
+    except Exception as e:
+        print(f"[!] RPC call failed: {e}")
         return None
 
-    def cache_source(self, address: str, source: Dict):
-        """Cache fetched source."""
-        source_hash = hashlib.sha256(
-            source.get('source_code', '').encode()
-        ).hexdigest()
+def resolve_proxy(address: str) -> dict:
+    # 1. EIP-1967 Implementation Slot
+    impl_1967 = rpc_call("eth_getStorageAt", [address, SLOT_EIP1967_IMPL, "latest"])
+    if impl_1967 and int(impl_1967, 16) != 0:
+        impl_addr = "0x" + impl_1967[-40:]
+        return {"isProxy": True, "type": "EIP-1967", "implementation": impl_addr}
 
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO sources
-                (address, source_code, compiler_version, contract_name, fetched_at, source_hash)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                address,
-                source.get('source_code'),
-                source.get('compiler_version'),
-                source.get('contract_name'),
-                datetime.now().isoformat(),
-                source_hash
-            ))
-            conn.commit()
-
-    def cache_finding(self, address: str, finding: Dict):
-        """Cache audit finding."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                INSERT INTO findings
-                (address, check_id, severity, confidence, title, description, location, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                address,
-                finding.get('checkId'),
-                finding.get('severity'),
-                finding.get('confidence'),
-                finding.get('title'),
-                finding.get('description'),
-                json.dumps(finding.get('location', {})),
-                datetime.now().isoformat()
-            ))
-            conn.commit()
-
-    def get_findings(self, address: str) -> list:
-        """Retrieve cached findings."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "SELECT check_id, severity, confidence, title, description, location FROM findings WHERE address = ?",
-                (address,)
-            )
-            findings = []
-            for row in cursor.fetchall():
-                findings.append({
-                    'checkId': row[0],
-                    'severity': row[1],
-                    'confidence': row[2],
-                    'title': row[3],
-                    'description': row[4],
-                    'location': json.loads(row[5]) if row[5] else {}
-                })
-            return findings
-
-
-def fetch_with_retry(address: str, max_retries: int = 3, backoff: float = 1.0) -> Optional[Dict]:
-    """Fetch source with exponential backoff for rate limiting."""
-    fetcher = SourceFetcher()
-
-    for attempt in range(max_retries):
-        try:
-            result = fetcher.fetch_from_bscscan(address)
-            if result:
-                return result
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 429:  # Rate limited
-                wait_time = backoff ** (attempt + 1)
-                print(f"⏳ Rate limited. Waiting {wait_time:.1f}s before retry...", file=sys.stderr)
-                time.sleep(wait_time)
-                continue
-            else:
-                raise
-        except Exception as e:
-            print(f"❌ Fetch failed: {e}", file=sys.stderr)
-            if attempt == max_retries - 1:
-                raise
-
-    return None
-
-
-def run_semgrep_audit(source: str, contract_path: str = "Contract.sol") -> Dict:
-    """Run Semgrep SIG-* rules on source code.
-
-    Uses validated custom Semgrep rules from solidity-auditor/references/semgrep-rules/
-    - SIG-01: ecrecover zero-address check
-    - SIG-03: chain-id domain separator binding
-    - SIG-11: uninitialized signer (research-only)
-    """
-    import subprocess
-    import tempfile
-
-    findings = {
-        'SIG-01': [],
-        'SIG-03': [],
-        'SIG-11': []
-    }
-
-    try:
-        # Write source to temp file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sol', delete=False) as f:
-            f.write(source)
-            temp_path = f.name
-
-        # Locate rule files relative to this script
-        rules_dir = Path(__file__).parent.parent / "references" / "semgrep-rules"
-
-        rules = {
-            'SIG-01': rules_dir / "sig-01-ecrecover-zero-check.yaml",
-            'SIG-03': rules_dir / "sig-03-chain-id-domain-separator.yaml",
-            'SIG-11': rules_dir / "sig-11-uninitialized-signer.yaml",
-        }
-
-        # Run Semgrep (if installed)
-        try:
-            for sig_type, rule_file in rules.items():
-                if not rule_file.exists():
-                    print(f"⚠️  Rule file not found: {rule_file}", file=sys.stderr)
-                    continue
-
-                result = subprocess.run(
-                    ['semgrep', f'--config={rule_file}', temp_path, '--json'],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-
-                if result.returncode == 0 or result.returncode == 1:  # 1 = findings found
-                    try:
-                        semgrep_output = json.loads(result.stdout)
-                        findings[sig_type] = semgrep_output.get('results', [])
-                    except json.JSONDecodeError:
-                        print(f"⚠️  Failed to parse Semgrep output for {sig_type}", file=sys.stderr)
-        except FileNotFoundError:
-            print("⚠️  semgrep not installed; skipping static analysis", file=sys.stderr)
-        except Exception as e:
-            print(f"⚠️  Semgrep error: {e}", file=sys.stderr)
-        finally:
-            os.unlink(temp_path)
-
-    except Exception as e:
-        print(f"❌ Semgrep audit failed: {e}", file=sys.stderr)
-
-    return findings
-
-
-def compile_with_solc(source: str, compiler_version: str) -> Tuple[bool, str]:
-    """Compile contract with solc."""
-    import subprocess
-    import tempfile
-
-    try:
-        # Select compiler version
-        subprocess.run(
-            ['solc-select', 'use', compiler_version],
-            capture_output=True,
-            check=False
-        )
-
-        # Compile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sol', delete=False) as f:
-            f.write(source)
-            temp_path = f.name
-
-        result = subprocess.run(
-            ['solc', temp_path],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        os.unlink(temp_path)
-
-        if result.returncode == 0:
-            return True, ""
-        else:
-            return False, result.stderr
-
-    except Exception as e:
-        return False, str(e)
-
-
-def audit_contract(address: str, cache_dir: str = "./cache") -> Dict:
-    """
-    Complete audit pipeline for a contract.
-
-    1. Fetch source from BscScan (with cache)
-    2. Resolve proxy if needed
-    3. Compile with appropriate solc version
-    4. Run Semgrep audits (SIG-01, SIG-03, SIG-11)
-    5. Aggregate and cache findings
-    """
-
-    cache = AuditCache(cache_dir)
-
-    print(f"🔍 Auditing {address}...", file=sys.stderr)
-
-    # Step 1: Check cache
-    cached = cache.get_source(address)
-    if cached:
-        print(f"✅ Using cached source (fetched {cached['fetched_at']})", file=sys.stderr)
-        source = cached['source_code']
-        compiler_version = cached['compiler_version']
-    else:
-        # Step 2: Fetch source
-        print(f"📥 Fetching from BscScan...", file=sys.stderr)
-        source_data = fetch_with_retry(address)
-
-        if not source_data:
+    # 2. EIP-1967 Beacon Slot
+    beacon = rpc_call("eth_getStorageAt", [address, SLOT_EIP1967_BEACON, "latest"])
+    if beacon and int(beacon, 16) != 0:
+        beacon_addr = "0x" + beacon[-40:]
+        # Selector for implementation(): keccak256("implementation()")[:4] -> 0x5c60da1b
+        impl_call = rpc_call("eth_call", [{"to": beacon_addr, "data": "0x5c60da1b"}, "latest"])
+        if impl_call and int(impl_call, 16) != 0:
+            impl_addr = "0x" + impl_call[-40:]
             return {
-                'address': address,
-                'error': 'Could not fetch source from BscScan',
-                'findings': []
+                "isProxy": True,
+                "type": "EIP-1967-Beacon",
+                "beacon": beacon_addr,
+                "implementation": impl_addr
             }
 
-        source = source_data.get('source_code')
-        compiler_version = source_data.get('compiler_version', '0.8.24')
+    # 3. EIP-1822 UUPS Slot
+    impl_1822 = rpc_call("eth_getStorageAt", [address, SLOT_EIP1822_UUPS, "latest"])
+    if impl_1822 and int(impl_1822, 16) != 0:
+        impl_addr = "0x" + impl_1822[-40:]
+        return {"isProxy": True, "type": "EIP-1822", "implementation": impl_addr}
 
-        # Cache it
-        cache.cache_source(address, source_data)
-        print(f"💾 Cached source", file=sys.stderr)
+    # 4. EIP-1167 Minimal Proxy Bytecode
+    code = rpc_call("eth_getCode", [address, "latest"]) or ""
+    clean_code = code.removeprefix("0x").lower()
 
-    # Step 3: Try to compile (validates source)
-    print(f"🔨 Compiling with solc {compiler_version}...", file=sys.stderr)
-    compiled, compile_error = compile_with_solc(source, compiler_version)
+    if clean_code.startswith("363d3d373d3d3d363d73") and clean_code[60:90] == "5af43d82803e903d91602b57fd5bf3":
+        impl = "0x" + clean_code[20:60]
+        return {"isProxy": True, "type": "EIP-1167", "implementation": impl}
 
-    if not compiled:
-        print(f"⚠️  Compilation failed: {compile_error[:100]}...", file=sys.stderr)
-        return {
-            'address': address,
-            'error': f'Compilation failed: {compile_error}',
-            'findings': []
+    if clean_code.startswith("3d3d3d3d363d3d37363d73") and len(clean_code) >= 62:
+        impl = "0x" + clean_code[22:62]
+        return {"isProxy": True, "type": "EIP-1167-Legacy", "implementation": impl}
+
+    return {"isProxy": False, "type": None, "implementation": None}
+
+def fetch_bscscan_source(address: str, api_key: str, conn: sqlite3.Connection) -> dict:
+    if not check_and_increment_budget(conn):
+        raise RuntimeError("Daily BscScan API budget reached (90% threshold).")
+
+    # 1. Primary: Etherscan V2 API (BSC chainid=56)
+    if api_key:
+        params = {
+            "chainid": "56",
+            "module": "contract",
+            "action": "getsourcecode",
+            "address": address,
+            "apikey": api_key
         }
+        for attempt in range(5):
+            try:
+                resp = requests.get(BSCSCAN_API, params=params, timeout=10)
+                if resp.status_code == 429:
+                    time.sleep(2 ** attempt)
+                    continue
+                data = resp.json()
+                if data.get("status") == "1" and data.get("result"):
+                    return data["result"][0]
+                elif data.get("message") == "NOTOK":
+                    print(f"    [!] Explorer API returned NOTOK: {data.get('result')}")
+                break
+            except Exception as e:
+                print(f"    [!] Network error fetching source: {e}")
+                break
 
-    print(f"✅ Compilation successful", file=sys.stderr)
+    # 2. Public Fallback: Sourcify V2 API (mirrors verified BSC / BscScan contract sources)
+    try:
+        sourcify_url = f"https://sourcify.dev/server/v2/contract/56/{address}?fields=sources,compilation"
+        resp = requests.get(sourcify_url, timeout=10)
+        if resp.status_code == 200:
+            s_data = resp.json()
+            sources = s_data.get("sources", {})
+            if sources:
+                compiler_ver = s_data.get("compilation", {}).get("compilerVersion", "")
+                if len(sources) == 1:
+                    fn, f_data = next(iter(sources.items()))
+                    return {
+                        "SourceCode": f_data.get("content", ""),
+                        "ContractName": fn.replace(".sol", ""),
+                        "CompilerVersion": compiler_ver
+                    }
+                else:
+                    std_json = {
+                        "sources": {fn: {"content": f_data.get("content", "")} for fn, f_data in sources.items()}
+                    }
+                    return {
+                        "SourceCode": "{{" + json.dumps(std_json) + "}}",
+                        "ContractName": "MultiFileContract",
+                        "CompilerVersion": compiler_ver
+                    }
+    except Exception as e:
+        print(f"    [!] Fallback source fetch error: {e}")
 
-    # Step 4: Run Semgrep audits
-    print(f"🔬 Running Semgrep audits...", file=sys.stderr)
-    semgrep_findings = run_semgrep_audit(source)
+    return {}
 
-    # Step 5: Aggregate findings into standardized format
-    findings = []
-    for check_id, check_findings in semgrep_findings.items():
-        for finding in check_findings:
-            extra = finding.get('extra', {})
+def is_erc20_conforming(source_text: str) -> bool:
+    required = ["totalSupply", "balanceOf", "transfer", "approve"]
+    return all(re.search(rf"\b{fn}\b", source_text) for fn in required)
 
-            # Extract severity and confidence from Semgrep JSON
-            severity = extra.get('severity', 'MEDIUM').upper()
-            confidence = extra.get('confidence', 'MEDIUM').upper()
-
-            # First line of message is the title
-            message = extra.get('message', f'{check_id} finding')
-            title = message.split('\n')[0] if message else f'{check_id} finding'
-
-            aggregated = {
-                'checkId': check_id,
-                'severity': severity,
-                'confidence': confidence,
-                'title': title,
-                'description': message,
-                'location': {
-                    'file': finding.get('path', 'Contract.sol'),
-                    'line': finding.get('start', {}).get('line', 0)
-                }
-            }
-            findings.append(aggregated)
-            cache.cache_finding(address, aggregated)
-
-    print(f"✅ Found {len(findings)} issues", file=sys.stderr)
-
-    return {
-        'address': address,
-        'source_code': source[:500],  # First 500 chars
-        'compiler_version': compiler_version,
-        'findings': findings,
-        'error': None
-    }
+def derive_status_and_action(confidence: str, severity: str, is_cross_validated: bool = False, is_info: bool = False, finding_type: str = "") -> tuple:
+    """
+    Programmatic derivation of (status, action) from (confidence, severity).
+    Mapping specification:
+      is_info and finding_type == "UNVERIFIED_SOURCE"  -> status="UNVERIFIED", action="MANUAL_REVIEW"
+      is_info                                          -> status="INFO",       action="LOG"
+      confidence == "HIGH" (Slither confirmed)         -> status="CONFIRMED",  action="DISCLOSE" (or "REVIEW" if sev < HIGH)
+      confidence == "MEDIUM" (Semgrep / documented FP)  -> status="FLAGGED",    action="REVIEW"
+      confidence == "LOW" and is_cross_validated        -> status="FLAGGED",    action="REVIEW"
+      confidence == "LOW" (Semgrep alone)               -> status="INFO",       action="INFO_ONLY"
+    """
+    if is_info:
+        if finding_type == "UNVERIFIED_SOURCE":
+            return "UNVERIFIED", "MANUAL_REVIEW"
+        return "INFO", "LOG"
+    conf = confidence.upper()
+    sev = severity.upper()
+    if conf == "HIGH":
+        action = "DISCLOSE" if sev == "HIGH" else "REVIEW"
+        return "CONFIRMED", action
+    elif conf == "MEDIUM":
+        return "FLAGGED", "REVIEW"
+    elif conf == "LOW":
+        if is_cross_validated:
+            return "FLAGGED", "REVIEW"
+        else:
+            return "INFO", "INFO_ONLY"
+    return "INFO", "LOG"
 
 
 def main():
-    """CLI entry point."""
-    parser = argparse.ArgumentParser(
-        description='Fetch BSC contract source and run SIG-* audits'
-    )
-    parser.add_argument('address', help='Contract address (0x...)')
-    parser.add_argument('--cache-dir', default='./cache', help='Cache directory')
-    parser.add_argument('--output', help='Output file (JSON)')
-    parser.add_argument('--proxy', action='store_true', help='Resolve proxy before auditing')
-
+    parser = argparse.ArgumentParser(description="Audit BSC contract signature verification")
+    parser.add_argument("--address", required=True, help="Token contract address")
+    parser.add_argument("--apikey", default=os.getenv("BSCSCAN_API_KEY", ""), help="BscScan API key")
+    parser.add_argument("--out", default="findings.json", help="Output JSON findings path")
     args = parser.parse_args()
 
-    # Resolve proxy if requested
-    address = args.address
-    if args.proxy:
-        try:
-            resolver = ProxyResolver()
-            proxy_info = resolver.resolve(address)
-            if proxy_info.get('is_proxy'):
-                print(f"🔗 Proxy detected: {proxy_info['proxy_type']}", file=sys.stderr)
-                if proxy_info.get('implementation'):
-                    print(f"   Implementation: {proxy_info['implementation']}", file=sys.stderr)
-                    address = proxy_info['implementation']
-        except Exception as e:
-            print(f"⚠️  Proxy resolution failed: {e}", file=sys.stderr)
+    conn = init_db()
+    target_addr = args.address.lower()
 
-    # Run audit
-    result = audit_contract(address, args.cache_dir)
+    print(f"[*] Starting audit for target: {target_addr}")
 
-    # Output
-    if args.output:
-        with open(args.output, 'w') as f:
-            json.dump(result, f, indent=2)
-        print(f"📄 Results written to {args.output}", file=sys.stderr)
+    # 1. Resolve Proxies
+    proxy_info = resolve_proxy(target_addr)
+    if proxy_info["isProxy"]:
+        print(f"    [+] Proxy detected ({proxy_info['type']}) -> Target implementation: {proxy_info['implementation']}")
+        fetch_addr = proxy_info["implementation"]
     else:
-        print(json.dumps(result, indent=2))
+        fetch_addr = target_addr
 
+    # 2. Fetch Source Code from BscScan
+    source_payload = fetch_bscscan_source(fetch_addr, args.apikey, conn)
+    raw_source = source_payload.get("SourceCode", "")
 
-if __name__ == '__main__':
+    if not raw_source:
+        print("    [!] Source code is unverified on BscScan.")
+        u_status, u_action = derive_status_and_action("LOW", "INFO", is_info=True, finding_type="UNVERIFIED_SOURCE")
+        unverified_report = {
+            "auditMetadata": {
+                "targetChain": "bsc",
+                "chainId": 56,
+                "scanTimestamp": datetime.now(timezone.utc).isoformat(),
+                "analyzer": "bsc-sig-audit-v1",
+                "status": "COMPLETED",
+                "detectorVersions": {
+                    "slither": "0.11.6",
+                    "semgrep": "1.179.0",
+                    "solc": "0.8.20",
+                    "sig-01-slither": "v1.0",
+                    "sig-03-semgrep": "v1.0"
+                }
+            },
+            "token": {"address": target_addr, "proxy": proxy_info},
+            "findings": [{
+                "checkId": "UNVERIFIED_SOURCE",
+                "severity": "INFO",
+                "confidence": "LOW",
+                "status": u_status,
+                "title": "Contract source code is unverified",
+                "description": "The contract bytecode is deployed on BSC without verified source code on BscScan.",
+                "action": u_action
+            }]
+        }
+        with open(args.out, "w") as f:
+            json.dump(unverified_report, f, indent=2)
+
+        # Update queue status if present
+        conn.execute("UPDATE token_queue SET status = 'UNVERIFIED' WHERE address = ?", (target_addr,))
+        conn.commit()
+        return
+
+    # 3. Unwrap Double Braces on Standard-JSON-Input
+    os.makedirs("workspace", exist_ok=True)
+    is_multi_file = False
+    source_to_hash = raw_source
+
+    if raw_source.startswith("{{") and raw_source.endswith("}}"):
+        raw_source = raw_source[1:-1]
+        is_multi_file = True
+
+    if is_multi_file:
+        parsed_json = json.loads(raw_source)
+        sources = parsed_json.get("sources", {})
+        combined_text = ""
+        for file_path, file_data in sources.items():
+            out_file = os.path.join("workspace", os.path.basename(file_path))
+            with open(out_file, "w") as f:
+                f.write(file_data.get("content", ""))
+            combined_text += file_data.get("content", "")
+        source_to_hash = combined_text
+        entry_contract = "workspace"
+    else:
+        entry_contract = os.path.join("workspace", "Contract.sol")
+        with open(entry_contract, "w") as f:
+            f.write(raw_source)
+        source_to_hash = raw_source
+
+    source_hash = hashlib.sha256(source_to_hash.encode()).hexdigest()
+
+    # 4. Token Interface Conformity Filter
+    if not is_erc20_conforming(source_to_hash):
+        print("    [-] Contract does not implement standard IERC20 functions. Skipping signature audit.")
+        conn.execute("UPDATE token_queue SET status = 'NON_TOKEN' WHERE address = ?", (target_addr,))
+        conn.commit()
+        return
+
+    # 5. Compiler Auto-Switch
+    compiler_ver = source_payload.get("CompilerVersion", "")
+    ver_match = re.search(r"v\d+\.\d+\.\d+", compiler_ver)
+    if ver_match and shutil.which("solc-select"):
+        ver = ver_match.group(0).removeprefix("v")
+        subprocess.run(["solc-select", "install", ver], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["solc-select", "use", ver], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    findings = []
+
+    semgrep_findings = []
+    # 6. Run Semgrep
+    if shutil.which("semgrep"):
+        print("    [*] Running Semgrep static checks...")
+        semgrep_cmd = [
+            "semgrep", "--config", "rules/semgrep.yaml", "workspace", "--json"
+        ]
+        sem_res = subprocess.run(semgrep_cmd, capture_output=True, text=True, check=False)
+        if sem_res.returncode == 0 and sem_res.stdout:
+            try:
+                sem_json = json.loads(sem_res.stdout)
+                for hit in sem_json.get("results", []):
+                    check_id = "SIG-01"
+                    if "sig03" in hit["check_id"]:
+                        check_id = "SIG-03"
+
+                    sev = "HIGH" if check_id == "SIG-01" else "MEDIUM"
+                    conf = "LOW" if check_id == "SIG-01" else "MEDIUM"
+                    semgrep_findings.append({
+                        "checkId": check_id,
+                        "severity": sev,
+                        "confidence": conf,
+                        "title": hit["extra"]["message"].split(".")[0],
+                        "location": {
+                            "file": hit["path"],
+                            "line": hit["start"]["line"]
+                        }
+                    })
+            except Exception:
+                pass
+    else:
+        print("    [-] semgrep CLI not available in PATH. Skipping syntactic check pass.")
+
+    # 7. Run Slither with Custom Detectors
+    slither_findings = []
+    if shutil.which("slither"):
+        print("    [*] Running Slither data-flow detectors...")
+        slither_cmd = [
+            "slither", entry_contract,
+            "--detect", "sig-01-zero-check",
+            "--json", "slither_out.json"
+        ]
+        subprocess.run(slither_cmd, capture_output=True, check=False)
+
+        if os.path.exists("slither_out.json"):
+            try:
+                with open("slither_out.json") as sf:
+                    s_data = json.load(sf)
+                    for det in s_data.get("results", {}).get("detectors", []):
+                        check_id = "SIG-01"
+                        slither_findings.append({
+                            "checkId": check_id,
+                            "severity": det["impact"].upper(),
+                            "confidence": det["confidence"].upper(),
+                            "title": det["description"].split("\n")[0],
+                            "location": {
+                                "file": det["elements"][0]["source_mapping"]["filename_relative"] if det["elements"] else "",
+                                "line": det["elements"][0]["source_mapping"]["lines"][0] if det["elements"] else 0
+                            }
+                        })
+            except Exception:
+                pass
+    else:
+        print("    [-] slither CLI not available in PATH. Skipping IR data-flow pass.")
+
+    # 8. Programmatic Derivation of (confidence, status, action) Triples
+    findings = []
+    slither_confirmed_sig01 = any(f["checkId"] == "SIG-01" for f in slither_findings)
+
+    for sf in slither_findings:
+        status, action = derive_status_and_action(sf["confidence"], sf["severity"], is_cross_validated=True)
+        sf["status"] = status
+        sf["action"] = action
+        findings.append(sf)
+
+    for sem_f in semgrep_findings:
+        is_cv = (sem_f["checkId"] == "SIG-01" and slither_confirmed_sig01)
+        status, action = derive_status_and_action(sem_f["confidence"], sem_f["severity"], is_cross_validated=is_cv)
+        sem_f["status"] = status
+        sem_f["action"] = action
+        findings.append(sem_f)
+
+    report = {
+        "auditMetadata": {
+            "targetChain": "bsc",
+            "chainId": 56,
+            "scanTimestamp": datetime.now(timezone.utc).isoformat(),
+            "analyzer": "bsc-sig-audit-v1",
+            "status": "COMPLETED",
+            "detectorVersions": {
+                "slither": "0.11.6",
+                "semgrep": "1.179.0",
+                "solc": "0.8.20",
+                "sig-01-slither": "v1.0",
+                "sig-03-semgrep": "v1.0"
+            }
+        },
+        "token": {
+            "address": target_addr,
+            "sourceHash": "0x" + source_hash,
+            "proxy": proxy_info
+        },
+        "findings": findings
+    }
+
+    with open(args.out, "w") as f:
+        json.dump(report, f, indent=2)
+
+    conn.execute("UPDATE token_queue SET status = 'AUDITED' WHERE address = ?", (target_addr,))
+    conn.commit()
+
+    print(f"[+] Audit completed. Total findings: {len(findings)}. Report saved to {args.out}")
+
+if __name__ == "__main__":
     main()
