@@ -1,0 +1,32 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-07T20:51:20.890802+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x5407912f1aa4b9e05cbe6abeb9721547a643ec6b",
+    "symbol": "LLYB",
+    "name": "Eli Lilly",
+    "implementationName": "MultiFileContract",
+    "marketCapUsd": 874340.640902459,
+    "liquidityUsd": 188414.1646,
+    "proxy": {
+      "isProxy": true,
+      "type": "EIP-1967-Beacon",
+      "beacon": "0x156d6dce9a4f6139a3406f1f021f1a4880de93a3",
+      "implementation": "0xcfed6c4679297ea4889f8183bc057b4a86c64e46"
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

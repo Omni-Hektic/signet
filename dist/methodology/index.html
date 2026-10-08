@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signet Methodology | Cryptographic Verification Specification</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #e1e4e8; background: #0d1117; max-width: 860px; margin: 0 auto; padding: 2rem 1rem; }
+    h1, h2, h3 { color: #58a6ff; border-bottom: 1px solid #21262d; padding-bottom: 0.3em; }
+    pre { background: #161b22; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+    code { background: #161b22; padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; font-size: 85%; }
+    pre code { background: none; padding: 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #30363d; padding: 8px 12px; text-align: left; }
+    th { background: #161b22; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    blockquote { border-left: 4px solid #388bfd; margin: 0; padding-left: 1rem; color: #8b949e; }
+  </style>
+</head>
+<body>
+<h1>Signet Cryptographic Verification &amp; Ingestion Methodology</h1>
+<p><strong>Version</strong>: 1.0.0<br />
+<strong>Target Chain</strong>: BNB Smart Chain Mainnet (<code>chainId: 56</code>)<br />
+<strong>Specification Link</strong>: <a href="https://signet.security/methodology">https://signet.security/methodology</a></p>
+<hr />
+<h2>1. Executive Summary &amp; Problem Space</h2>
+<p>Traditional Web3 security scanners (e.g. Honeypot.is, TokenSniffer, GoPlus) perform state simulations: they check whether a user can buy and sell tokens at block $N$. However, they exhibit two critical blind spots:</p>
+<ol>
+<li><strong>The Proxy Blind Spot</strong>: Over 60% of micro-cap BSC tokens are deployed behind <strong>EIP-1167 Minimal Clones</strong> or <strong>EIP-1967 Proxies</strong>. Generic scanners inspect only 45 bytes of unverified bytecode, leaving traders and launchpad presales blind to the actual implementation logic.</li>
+<li><strong>The Signature Forgery Blind Spot</strong>: Honeypot checks only verify permissions today. They fail to inspect cryptographic delegation routines (<code>permit</code>, <code>transferWithSig</code>, <code>meta-transactions</code>). If a contract contains an unchecked <code>ecrecover</code> return value, any actor can submit a zeroed signature (<code>v=0, r=0, s=0</code>) to forge an infinite approval tomorrow.</li>
+</ol>
+<p><strong>Signet</strong> is an automated on-chain de-aliasing engine and cryptographic static analysis primitive designed specifically to detect signature delegation vulnerabilities at line rate.</p>
+<hr />
+<h2>2. On-Chain Ingestion &amp; Reorg Finality Layer</h2>
+<p>Signet operates directly on EVM DEX factory state rather than relying on rate-limited third-party REST APIs:</p>
+<pre><code>[PancakeSwap V2 Factory] 
+       │
+       ▼
+ [allPairsLength()] ──► Evaluated at block height (latest - 15)
+       │
+       ▼
+ [allPairs(index)]  ──► 15-Block Safe Buffer (~45s depth)
+       │
+       ├──► Canonical Quote Filter (WBNB/USDT)
+       └──► Reorg Immunity (Zero transient ghost pairs)
+</code></pre>
+<ul>
+<li><strong>Factory Counter Polling</strong>: Queries <code>allPairsLength()</code> and <code>allPairs(uint256)</code> on the canonical PancakeSwap V2 Factory (<code>0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73</code>) via <code>eth_call</code>.</li>
+<li><strong>15-Block EVM Block Depth</strong>: All factory index, pair token, and reserve queries pass an explicit block tag <code>hex(latest_block - 15)</code>. This guarantees that Signet reads BSC state confirmed 15 blocks (~45 seconds) in the past, eliminating micro-reorg state corruption.</li>
+<li><strong>Canonical Quoting Separation &amp; Spam Filtering</strong>: Filters incoming pairs based on liquidity base assets:
+<ul>
+<li><strong>Canonical Pairs (~75–80%)</strong>: Pairs quoted directly against established liquid base currencies (<code>WBNB</code>, <code>USDT</code>, <code>USDC</code>, <code>BUSD</code>, <code>BTCB</code>, <code>ETH</code>, <code>CAKE</code>), representing actionable trading pools.</li>
+<li><strong>Non-Canonical Pairs / Spam (~20–25%)</strong>: Synthetic token-to-token listings where neither asset is a recognized quote currency (often wash-trading test scripts, dust routing, or placeholder pools). These burn sniper node simulation cycles without offering executable DEX routing, and are filtered before entering downstream queues.</li>
+</ul>
+</li>
+</ul>
+<hr />
+<h2>3. Proxy De-Aliasing Architecture</h2>
+<p>Across our empirical baseline of 37 micro-cap BSC pools ($20k+ liquidity), <strong>62.2% (23/37) deployed behind proxy patterns</strong>, with <strong>56.8% (21/37) specifically conforming to EIP-1167 Minimal Proxy Clones</strong> and 5.4% (2/37) utilizing EIP-1967/Beacon storage slots.</p>
+<p>When a token is evaluated, Signet executes an automated 3-tier de-aliasing sequence:</p>
+<ol>
+<li><strong>EIP-1167 Minimal Proxy Clone Detection</strong>:
+Inspects bytecode for the standardized 45-byte runtime pattern:<pre><code>363d3d373d3d3d363d73&lt;20-byte target&gt;5af43d82803e903d91602b57fd5bf3
+</code></pre>
+If matched, Signet extracts the target implementation address directly from bytecode bytes 10–30.</li>
+<li><strong>EIP-1967 &amp; EIP-1822 Storage Slot Inspection</strong>:
+Calls <code>eth_getStorageAt</code> for:
+<ul>
+<li>Implementation Slot: <code>0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc</code></li>
+<li>Beacon Slot: <code>0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50</code></li>
+</ul>
+</li>
+<li><strong>Automated Source Resolution</strong>:
+Fetches the verified implementation source code using the unified BscScan/Etherscan V2 API (<code>chainid=56</code>) with automated fallback to the decentralized <strong>Sourcify</strong> registry (<code>repo.sourcify.dev</code>).</li>
+</ol>
+<hr />
+<h2>4. Two-Engine Cryptographic Analysis Hierarchy</h2>
+<p>Signet combines rapid AST pre-filtering with deep SSA IR taint analysis:</p>
+<pre><code>[Target Contract Source]
+          │
+          ▼
+┌───────────────────────────────┐
+│ Level 1: Semgrep AST Filter   │ ──► Sub-second syntax pattern match
+└──────────────┬────────────────┘
+               │ (Flags potential signature functions)
+               ▼
+┌───────────────────────────────┐
+│ Level 2: Slither IR Analysis  │ ──► Slither SSA Data-flow &amp; Taint Tracking
+└──────────────┬────────────────┘
+               │
+               ▼
+   [Cryptographic Verdict Card]
+</code></pre>
+<h3>Vulnerability Definitions:</h3>
+<ul>
+<li><strong><code>SIG-01</code> (Unchecked <code>ecrecover</code> Return Value)</strong>:
+<code>ecrecover</code> returns <code>address(0)</code> when given an invalid signature. If the contract compares the recovered address to a state variable (e.g., <code>require(ecrecover(...) == trustedSigner)</code>) and <code>trustedSigner</code> is uninitialized or null, an attacker can submit an arbitrary zeroed signature to pass authorization.
+<ul>
+<li><em>Suppression Invariant</em>: Safe wrappers (such as OpenZeppelin's <code>ECDSA.tryRecover</code>) explicitly check <code>signer != address(0)</code> and return a boolean. Signet enforces AST suppression to guarantee <strong>0% false positives</strong> on safe wrapper libraries.</li>
+</ul>
+</li>
+<li><strong><code>SIG-03</code> (Missing Chain ID Binding in EIP-712 Permitted Signatures)</strong>:
+Signature authorizations that omit <code>block.chainid</code> in their domain separator are vulnerable to cross-chain replay attacks. A valid approval signed for BNB Smart Chain can be replayed by an attacker on Ethereum or Polygon.</li>
+</ul>
+<hr />
+<h2>5. Compute Gating &amp; Presale Priority Policy</h2>
+<p>To protect cloud compute COGS and preserve a &gt; 70% gross margin model, Signet enforces a 3-tier compute policy:</p>
+<p>| Tier | Trigger Mechanism | Action | Gating Rule |
+| :--- | :--- | :--- | :--- |
+| <strong>Tier 1: Discovery</strong> | On-chain <code>PairCreated</code> polling | Records pair, tokens, and block | 100% coverage, &lt; $0.00001/pair |
+| <strong>Tier 2: Cache-Warming</strong> | Newly created DEX pool | Executes cold Slither audit | $\ge $25,000$ liquidity (Trigger rate &lt; 10%) |
+| <strong>Tier 2: Presale Priority</strong> | Launchpad registration webhook | Proactively audits &amp; warms cache | <strong>Bypasses liquidity gate</strong> (presales audited before launch) |
+| <strong>Tier 3: On-Demand</strong> | Trading bot / API caller query | &lt; 35ms warm hit; 202 on cold miss | Prioritized async worker |</p>
+<hr />
+<h2>6. Service Level Agreements (SLA) &amp; Guarantees</h2>
+<ul>
+<li><strong>Warm Cache Read SLA</strong>: <code>&lt; 35ms</code> (empirically benchmarked at 8–12ms from CDN / Redis).</li>
+<li><strong>Cold Asynchronous Response</strong>: HTTP 202 Accepted returned in <code>&lt; 20ms</code> with job tracking ID and 1-hour polling TTL.</li>
+<li><strong>Zero Layout Shift Invariant</strong>: All embeddable SVG badges conform strictly to <code>180×28px</code>.</li>
+<li><strong>Zero Disruption Pilot Exit</strong>: On Day 15, unrenewed pilot badges transition automatically to a neutral <code>⚪ [ SIGNET | PILOT EXPIRED ]</code> state (HTTP 200, matching dimensions, no broken images).</li>
+</ul>
+<hr />
+<h2>7. Scope &amp; Liability Disclaimer</h2>
+<p>Signet operates as an <strong>objective cryptographic static analysis and transparency primitive</strong>.</p>
+<ul>
+<li>A <code>[ SIGNET | VERIFIED CLEAN ]</code> badge verifies that contract bytecode was de-aliased and contains zero detectable <code>SIG-01</code> or <code>SIG-03</code> signature delegation vulnerabilities.</li>
+<li>Signet does <strong>not</strong> audit business logic, tokenomics, off-chain liquidity management, team identity, or external contract oracles.</li>
+<li>Signet is not a financial guarantee, insurance policy, or investment endorsement.</li>
+</ul>
+
+</body>
+</html>

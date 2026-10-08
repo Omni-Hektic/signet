@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signet Launchpad Badge Frontend Test Harness</title>
+  <!-- Strict Content Security Policy simulating production DEX / Launchpad environment -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' http://127.0.0.1:8088 data:; style-src 'self' 'unsafe-inline';">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #0d1117;
+      color: #c9d1d9;
+      padding: 40px;
+      margin: 0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    .token-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #21262d;
+      padding-bottom: 16px;
+      margin-bottom: 16px;
+    }
+    .token-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #f0f6fc;
+    }
+    .badge-wrapper {
+      display: inline-flex;
+      align-items: center;
+      transition: transform 0.15s ease;
+    }
+    .badge-wrapper:hover {
+      transform: translateY(-1px);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .prop-box {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .prop-label {
+      font-size: 12px;
+      color: #8b949e;
+      text-transform: uppercase;
+    }
+    .prop-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #e6edf3;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🧪 Signet Launchpad Embed Test Harness (Simulated PinkSale / Four.meme)</h2>
+    <p style="color: #8b949e; font-size: 14px;">
+      Verifies SVG badge rendering under strict CSP policies, dimension stability (180x28px), and hover interaction.
+    </p>
+
+    <!-- Test Case 1: Verified Clean Token (HOOKS) -->
+    <div class="card">
+      <div class="token-header">
+        <div>
+          <div class="token-title">$HOOKS Presale</div>
+          <div style="font-size: 12px; color: #8b949e; margin-top: 4px;">0x07bcb8e8226f671300e135b4a61dc157359b7777</div>
+        </div>
+        <div class="badge-wrapper">
+          <a href="http://127.0.0.1:8088/v1/scan/0x07bcb8e8226f671300e135b4a61dc157359b7777" target="_blank" title="Signet Cryptographic Verification">
+            <img src="http://127.0.0.1:8088/v1/badge/0x07bcb8e8226f671300e135b4a61dc157359b7777.svg" width="180" height="28" alt="Signet Verification Badge" />
+          </a>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="prop-box"><div class="prop-label">Presale Status</div><div class="prop-value" style="color: #3fb950;">ACTIVE</div></div>
+        <div class="prop-box"><div class="prop-label">Liquidity Locked</div><div class="prop-value">100% (PancakeSwap V2)</div></div>
+      </div>
+    </div>
+
+    <!-- Test Case 2: Uncached / Pending Scanning Token -->
+    <div class="card">
+      <div class="token-header">
+        <div>
+          <div class="token-title">$NEWTOKEN Fair Launch</div>
+          <div style="font-size: 12px; color: #8b949e; margin-top: 4px;">0x1234567890123456789012345678901234567890</div>
+        </div>
+        <div class="badge-wrapper">
+          <a href="http://127.0.0.1:8088/v1/scan/0x1234567890123456789012345678901234567890" target="_blank" title="Signet Cryptographic Verification">
+            <img src="http://127.0.0.1:8088/v1/badge/0x1234567890123456789012345678901234567890.svg" width="180" height="28" alt="Signet Verification Badge" />
+          </a>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="prop-box"><div class="prop-label">Presale Status</div><div class="prop-value" style="color: #8b949e;">UPCOMING</div></div>
+        <div class="prop-box"><div class="prop-label">Audit Pipeline</div><div class="prop-value">Enqueued (Async Queue)</div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

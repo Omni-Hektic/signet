@@ -1,0 +1,31 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-07T20:53:26.739547+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x8b431c93d804c345fae9a4598b20094598a9ffa1",
+    "symbol": "SpaceXSI",
+    "name": "SpaceXSI",
+    "implementationName": "Token",
+    "marketCapUsd": 575285.6208,
+    "liquidityUsd": 98157.6311,
+    "proxy": {
+      "isProxy": false,
+      "type": null,
+      "implementation": null
+    },
+    "sourceVerified": true
+  },
+  "findings": []
+}

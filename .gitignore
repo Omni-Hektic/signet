@@ -3,7 +3,8 @@
 **/evals/results/
 .venv/
 .venv_slither/
-audit_cache.db
+*.db-shm
+*.db-wal
 *.pyc
 __pycache__/
 *.egg-info/

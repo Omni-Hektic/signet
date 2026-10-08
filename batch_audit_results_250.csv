@@ -1,0 +1,38 @@
+address,token_name,implementation_name,mcap,liquidity,is_proxy,proxy_type,source_verified,sig01_findings,sig01_fp,sig03_findings,sig03_fp,sig01_semgrep_candidates,sig01_semgrep_confirmed
+0x5407912f1aa4b9e05cbe6abeb9721547a643ec6b,Eli Lilly,MultiFileContract,874340.64,188414.16,True,EIP-1967-Beacon,True,0,0,0,0,0,0
+0xa2be3e48170a60119b5f0400c65f65f3158fbeee,ZEUS,MultiFileContract,387255.02,178715.47,False,NONE,True,0,0,0,0,0,0
+0xf7de7e8a6bd59ed41a4b5fe50278b3b7f31384df,Radiant,MultiFileContract,366757.99,139859.43,False,NONE,True,0,0,0,0,0,0
+0x3efbfff95576e1d23cf6ead0acd2e73f4d6a7777,Binance Cat,MultiFileContract,874292.0,138278.28,True,EIP-1167,True,0,0,0,0,0,0
+0xcaf66eb2c00d206d741a654face34768cf2a7777,Binance Inu,MultiFileContract,939853.0,112263.56,True,EIP-1167,True,0,0,0,0,0,0
+0x55db4b1f497b1d7aa93354701883efc758367777,Wired fees to socials,MultiFileContract,748728.0,104555.98,True,EIP-1167,True,0,0,0,0,0,0
+0xd1cab9922357fc7ae7a9861b29191b84bdb47777,SpaceX Inu,MultiFileContract,692493.0,101714.32,True,EIP-1167,True,0,0,0,0,0,0
+0x8b431c93d804c345fae9a4598b20094598a9ffa1,SpaceXSI,Token,575285.62,98157.63,False,NONE,True,0,0,0,0,0,0
+0x7fb4758cb0c617c0bab1baf80525fab958637777,币恩宝,MultiFileContract,588709.0,97269.77,True,EIP-1167,True,0,0,0,0,0,0
+0x90269edbf32583a47fa283835b5d35d5d83d7777,Zero,MultiFileContract,542557.0,88775.03,True,EIP-1167,True,0,0,0,0,0,0
+0x4ebf5fd25b02022afad96e2fa25da54a246fded0,Wrapped Pop Mart International xStock,Unverified,357629.48,87983.87,True,EIP-1967,False,0,0,0,0,0,0
+0x7b307ad0360499099291db190c5c0b111c147777,豆助 Mamesuke,MultiFileContract,500623.0,82735.56,True,EIP-1167,True,0,0,0,0,0,0
+0xc561dc47b9c1c036e77ecffdde66b8f451847777,SUAN,MultiFileContract,544955.0,82658.4,True,EIP-1167,True,0,0,0,0,0,0
+0x3ae862cbf9584d4d9dbe65f65a0fe346c08980f2,契约精神,Unverified,272575.0,76185.89,False,NONE,False,0,0,0,0,0,0
+0x556e0fea0bad640bc266a824e8b8a81dcc4c6108,CZ's Dog,Token,112592.0,74746.53,False,NONE,True,0,0,0,0,0,0
+0xbb013e206aa2f36f6d0b434653fab0a45d667777,The Three Wise Monkeys,MultiFileContract,366767.0,71827.78,True,EIP-1167,True,0,0,0,0,0,0
+0x07bcb8e8226f671300e135b4a61dc157359b7777,pickhooks,MultiFileContract,366020.0,68861.3,True,EIP-1167,True,0,0,0,0,0,0
+0x6331bf8d601f0d7f0d2101772af5137c418c4444,Binance Super Cycle,MultiFileContract,120618.0,68705.1,False,NONE,True,0,0,0,0,0,0
+0x3b4cbdb0a05d08638d6c11a79d0455fb9ffa65ff,Shield,Unverified,227337.0,63787.13,False,NONE,False,0,0,0,0,0,0
+0xcc722b1e06c73a3b82e7d53752d67c8f1b3d7777,币安世界,MultiFileContract,339569.0,60997.77,True,EIP-1167,True,0,0,0,0,0,0
+0x3783dcefe8811c1293cc0c71cb57109845490e06,Binance AI Agent,Unverified,418076.15,50728.74,False,NONE,False,0,0,0,0,0,0
+0xda2fd814da34a489051c3471c0169c936aa37777,Wisp,MultiFileContract,197378.0,45838.77,True,EIP-1167,True,0,0,0,0,0,0
+0xb9d1b6f9794cee6ea127efa62faa631cd072279c,CAKE,contracts/CAKE,111279.0,30589.91,False,NONE,True,0,0,0,0,0,0
+0x5e904368dd716db2e14fe351d26565ad90c47777,Fitcoin,MultiFileContract,90512.44,29187.73,True,EIP-1167,True,0,0,0,0,0,0
+0x0efb5fd2402a0967b92551d6af54de148504a115,Wrapped BNB,WBNB,114305.0,28482.77,False,NONE,True,0,0,0,0,0,0
+0xd75a0cc8614b7c8cac56f5af39d73491c2ea7777,躺赢,MultiFileContract,776178.0,27706.25,True,EIP-1167,True,0,0,0,0,0,0
+0xc0ffa44cce92071d9bdac92798056e9edb0f7777,分身,MultiFileContract,61806.36,26223.53,True,EIP-1167,True,0,0,0,0,0,0
+0x6b4917a11bcb3bdcb545d79f211e81aa5835a3ba,BNB SUPER CYCLE,Token,22290.0,25689.48,False,NONE,True,0,0,0,0,0,0
+0x36f59961babd03a3448d7d9d017207e2bbcc7777,屌丝生活,MultiFileContract,61246.02,24895.66,True,EIP-1167,True,0,0,0,0,0,0
+0x5e83f3ad463e33d6235a887c4f6e7c97d8b07777,薄肌小赵,MultiFileContract,43513.94,21745.83,True,EIP-1167,True,0,0,0,0,0,0
+0x94a62ddb7d4e2d2bcfe6cc65bca3d9485a4e7777,bStocks Super Cycle,MultiFileContract,10182.0,18812.86,True,EIP-1167,True,0,0,0,0,0,0
+0x8c29fc7a43eb6dc592c1d5f06d3fd574d9fb1fd7,Binance Super Cycle,Token,12216.0,14623.56,False,NONE,True,0,0,0,0,0,0
+0x12551c2dac37ad7af38e25d11177ff57e1ee7777,Мойнок,MultiFileContract,9007.04,10013.69,True,EIP-1167,True,0,0,0,0,0,0
+0xd6c29dfb33db03584dbd702bada0001cc4eb7777,Big Smart Cat,MultiFileContract,4382.0,9702.3,True,EIP-1167,True,0,0,0,0,0,0
+0xba4a3c140436ee1e1097730269c5e673bfcf4444,Bad Silly Cat,MultiFileContract,4557.0,8916.96,False,NONE,True,0,0,0,0,0,0
+0xb261ae567d6f08013a6d40c55c23f41e45de4444,Bad Silly Cat,MultiFileContract,4639.0,8610.86,False,NONE,True,0,0,0,0,0,0
+0x8982aad5d4bd5fe3e51d04b46ed4f4019e7f7777,Binance Stock Cycle,MultiFileContract,7561.0,8591.18,True,EIP-1167,True,0,0,0,0,0,0

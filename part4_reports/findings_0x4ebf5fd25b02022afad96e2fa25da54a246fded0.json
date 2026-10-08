@@ -1,0 +1,41 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-07T20:53:58.433248+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x4ebf5fd25b02022afad96e2fa25da54a246fded0",
+    "symbol": "wPOPMTx",
+    "name": "Wrapped Pop Mart International xStock",
+    "implementationName": "Unverified",
+    "marketCapUsd": 357629.481798663,
+    "liquidityUsd": 87983.8742,
+    "proxy": {
+      "isProxy": true,
+      "type": "EIP-1967",
+      "implementation": "0x76c6851ea0b2741eedcbbed240715e8817e85583"
+    },
+    "sourceVerified": false
+  },
+  "findings": [
+    {
+      "checkId": "UNVERIFIED_SOURCE",
+      "severity": "INFO",
+      "confidence": "LOW",
+      "status": "UNVERIFIED",
+      "title": "Contract source code is unverified",
+      "description": "The contract bytecode is deployed on BSC without verified source code on BscScan.",
+      "action": "MANUAL_REVIEW"
+    }
+  ]
+}

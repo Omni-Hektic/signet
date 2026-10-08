@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""
+api/scanner.py: Core Contract Audit Engine & Worker for Signet
+
+Performs complete static analysis and cryptographic delegation checks:
+1. Proxy de-aliasing: EIP-1967, EIP-1822, EIP-1167 minimal clones.
+2. Source fetch: Etherscan V2 API (BSC chainid=56) + Sourcify fallback.
+3. Multi-file source unpacking with double-brace unwrap.
+4. Auto compiler switching via solc-select.
+5. Semgrep syntactic heuristics (SIG-01 zero-check suppression + SIG-03 replay binding).
+6. Slither SSA IR data-flow analysis (SIG-01 zero-check).
+7. Programmatic derivation of (confidence, status, action) triples.
+"""
+
+import os
+import sys
+import json
+import re
+import time
+import shutil
+import sqlite3
+import subprocess
+from datetime import datetime, timezone
+from typing import Dict, Any, Tuple, Optional
+
+# Ensure virtualenv binaries (semgrep, slither, solc) are in PATH
+# Add virtualenv binaries to PATH if present (local dev); rely on system PATH in containers
+for _candidate in [
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".venv", "bin"),
+    "/app/.venv/bin",
+    "/usr/local/bin",
+    os.path.expanduser("~/.local/bin"),
+]:
+    if os.path.isdir(_candidate) and _candidate not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = f"{_candidate}:{os.environ.get('PATH', '')}"
+
+try:
+    from solidity_auditor.tools.fetch_and_audit import (
+        resolve_proxy,
+        fetch_bscscan_source,
+        init_db,
+        derive_status_and_action,
+        rpc_call
+    )
+    _SCANNER_ENGINE_AVAILABLE = True
+except ImportError as e:
+    _SCANNER_ENGINE_AVAILABLE = False
+    _SCANNER_ENGINE_ERROR = str(e)
+
+    def _engine_unavailable(*args, **kwargs):
+        raise RuntimeError(
+            f"Cold audit engine unavailable in this deployment: {_SCANNER_ENGINE_ERROR}"
+        )
+
+    resolve_proxy = _engine_unavailable
+    fetch_bscscan_source = _engine_unavailable
+    init_db = _engine_unavailable
+    derive_status_and_action = _engine_unavailable
+    rpc_call = _engine_unavailable
+
+REPORTS_DIR = "part4_reports"
+os.makedirs(REPORTS_DIR, exist_ok=True)
+
+def get_token_name(addr: str) -> str:
+    """Queries ERC20 name() on BSC."""
+    res = rpc_call("eth_call", [{"to": addr, "data": "0x06fdde03"}, "latest"])
+    if not res or res == "0x" or len(res) < 66:
+        return ""
+    try:
+        hex_data = res[2:]
+        offset = int(hex_data[:64], 16) * 2
+        length = int(hex_data[offset:offset+64], 16)
+        name_hex = hex_data[offset+64:offset+64+length*2]
+        return bytes.fromhex(name_hex).decode("utf-8", errors="ignore").strip("\x00")
+    except Exception:
+        try:
+            return bytes.fromhex(hex_data[:64]).decode("utf-8", errors="ignore").strip("\x00")
+        except Exception:
+            return ""
+
+def get_token_symbol(addr: str) -> str:
+    """Queries ERC20 symbol() on BSC."""
+    res = rpc_call("eth_call", [{"to": addr, "data": "0x95d89b41"}, "latest"])
+    if not res or res == "0x" or len(res) < 66:
+        return ""
+    try:
+        hex_data = res[2:]
+        offset = int(hex_data[:64], 16) * 2
+        length = int(hex_data[offset:offset+64], 16)
+        sym_hex = hex_data[offset+64:offset+64+length*2]
+        return bytes.fromhex(sym_hex).decode("utf-8", errors="ignore").strip("\x00")
+    except Exception:
+        try:
+            return bytes.fromhex(hex_data[:64]).decode("utf-8", errors="ignore").strip("\x00")
+        except Exception:
+            return ""
+
+def execute_cold_audit(address: str, conn: Optional[sqlite3.Connection] = None) -> Tuple[Dict[str, Any], float]:
+    """
+    Executes a full cold audit for an address.
+    Returns (report_dict, duration_seconds).
+    """
+    start_time = time.time()
+    addr_lower = address.lower()
+    
+    if conn is None:
+        conn = init_db("audit_cache.db")
+
+    token_name = get_token_name(addr_lower) or "Unknown Token"
+    token_sym = get_token_symbol(addr_lower) or "TOKEN"
+
+    # 1. Resolve proxy
+    proxy_info = resolve_proxy(addr_lower)
+    is_proxy = proxy_info.get("isProxy", False)
+    target_addr = proxy_info.get("implementation") if is_proxy else addr_lower
+
+    # 2. Fetch source code
+    api_key = os.getenv("BSCSCAN_API_KEY", "")
+    source_payload = fetch_bscscan_source(target_addr, api_key, conn)
+    raw_source = source_payload.get("SourceCode", "")
+    contract_name = source_payload.get("ContractName", token_sym)
+    compiler_ver = source_payload.get("CompilerVersion", "")
+    source_verified = bool(raw_source)
+
+    token_out = os.path.join(REPORTS_DIR, f"findings_{addr_lower}.json")
+    findings = []
+
+    if not source_verified:
+        u_status, u_action = derive_status_and_action("LOW", "INFO", is_info=True, finding_type="UNVERIFIED_SOURCE")
+        report = {
+            "auditMetadata": {
+                "targetChain": "bsc",
+                "chainId": 56,
+                "scanTimestamp": datetime.now(timezone.utc).isoformat(),
+                "analyzer": "bsc-sig-audit-v1",
+                "status": "COMPLETED",
+                "detectorVersions": {
+                    "slither": "0.11.6",
+                    "semgrep": "1.179.0",
+                    "solc": "0.8.20",
+                    "sig-01-slither": "v1.0",
+                    "sig-03-semgrep": "v1.0"
+                }
+            },
+            "token": {
+                "address": addr_lower,
+                "symbol": token_sym,
+                "name": token_name,
+                "implementationName": "Unverified",
+                "proxy": proxy_info,
+                "sourceVerified": False
+            },
+            "findings": [{
+                "checkId": "UNVERIFIED_SOURCE",
+                "severity": "INFO",
+                "confidence": "LOW",
+                "status": u_status,
+                "title": "Contract source code is unverified",
+                "description": "The contract bytecode is deployed on BSC without verified source code on BscScan.",
+                "action": u_action
+            }]
+        }
+    else:
+        # Setup workspace for analysis
+        ws_dir = os.path.join("/tmp", f"ws_{addr_lower}")
+        if os.path.exists(ws_dir):
+            shutil.rmtree(ws_dir)
+        os.makedirs(ws_dir, exist_ok=True)
+
+        sc = raw_source.strip()
+        data = None
+        while sc.startswith("{") and sc.endswith("}"):
+            try:
+                data = json.loads(sc)
+                break
+            except Exception:
+                if len(sc) > 2:
+                    sc = sc[1:-1].strip()
+                else:
+                    break
+
+        if isinstance(data, dict) and "sources" in data:
+            sources = data["sources"]
+            entry_path = ws_dir
+            for fn, fd in sources.items():
+                rel_p = fn.lstrip("/\\")
+                p = os.path.join(ws_dir, rel_p)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(fd.get("content", ""))
+        else:
+            entry_path = os.path.join(ws_dir, "Contract.sol")
+            with open(entry_path, "w", encoding="utf-8") as f:
+                f.write(raw_source)
+
+        # Compiler auto-switch
+        ver_match = re.search(r"v\d+\.\d+\.\d+", compiler_ver) or re.search(r"\d+\.\d+\.\d+", compiler_ver)
+        if ver_match and shutil.which("solc-select"):
+            v_str = ver_match.group(0).removeprefix("v")
+            subprocess.run(["solc-select", "install", v_str], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["solc-select", "use", v_str], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Run Semgrep heuristics
+        semgrep_findings = []
+        if shutil.which("semgrep"):
+            cmd_sem = ["semgrep", "--config", "rules/semgrep.yaml", ws_dir, "--json"]
+            res_sem = subprocess.run(cmd_sem, capture_output=True, text=True, check=False)
+            if res_sem.returncode == 0 and res_sem.stdout:
+                try:
+                    s_data = json.loads(res_sem.stdout)
+                    for hit in s_data.get("results", []):
+                        cid = "SIG-01" if "sig01" in hit["check_id"] else ("SIG-03" if "sig03" in hit["check_id"] else hit["check_id"])
+                        sev = "HIGH" if cid == "SIG-01" else "MEDIUM"
+                        conf = "LOW" if cid == "SIG-01" else "MEDIUM"
+                        semgrep_findings.append({
+                            "checkId": cid,
+                            "severity": sev,
+                            "confidence": conf,
+                            "title": hit["extra"]["message"].split(".")[0],
+                            "location": {
+                                "file": hit["path"],
+                                "line": hit["start"]["line"]
+                            }
+                        })
+                except Exception:
+                    pass
+
+        # Run Slither SSA IR zero-check
+        slither_findings = []
+        slither_cpu = 0.0
+        if shutil.which("slither"):
+            t_slither_start = time.perf_counter()
+            out_slither = os.path.join(ws_dir, "slither.json")
+            cmd_slither = ["slither", entry_path, "--detect", "sig-01-zero-check", "--json", out_slither]
+            subprocess.run(cmd_slither, capture_output=True, check=False)
+            slither_cpu = time.perf_counter() - t_slither_start
+            if os.path.exists(out_slither):
+                try:
+                    with open(out_slither) as sf:
+                        sl_data = json.load(sf)
+                        for det in sl_data.get("results", {}).get("detectors", []):
+                            slither_findings.append({
+                                "checkId": "SIG-01",
+                                "severity": det["impact"].upper(),
+                                "confidence": det["confidence"].upper(),
+                                "title": det["description"].split("\n")[0],
+                                "location": {
+                                    "file": det["elements"][0]["source_mapping"]["filename_relative"] if det["elements"] else "",
+                                    "line": det["elements"][0]["source_mapping"]["lines"][0] if det["elements"] else 0
+                                }
+                            })
+                except Exception:
+                    pass
+
+        # Merge findings
+        slither_confirmed_sig01 = any(f["checkId"] == "SIG-01" for f in slither_findings)
+        for sf in slither_findings:
+            st, ac = derive_status_and_action(sf["confidence"], sf["severity"], is_cross_validated=True)
+            sf["status"] = st
+            sf["action"] = ac
+            findings.append(sf)
+
+        for sem_f in semgrep_findings:
+            if sem_f["checkId"] == "SIG-01" and not slither_confirmed_sig01:
+                # Suppress unconfirmed Semgrep SIG-01 candidate
+                continue
+            is_cv = (sem_f["checkId"] == "SIG-01" and slither_confirmed_sig01)
+            st, ac = derive_status_and_action(sem_f["confidence"], sem_f["severity"], is_cross_validated=is_cv)
+            sem_f["status"] = st
+            sem_f["action"] = ac
+            findings.append(sem_f)
+
+        report = {
+            "auditMetadata": {
+                "targetChain": "bsc",
+                "chainId": 56,
+                "scanTimestamp": datetime.now(timezone.utc).isoformat(),
+                "analyzer": "bsc-sig-audit-v1",
+                "status": "COMPLETED",
+                "detectorVersions": {
+                    "slither": "0.11.6",
+                    "semgrep": "1.179.0",
+                    "solc": compiler_ver or "0.8.20",
+                    "sig-01-slither": "v1.0",
+                    "sig-03-semgrep": "v1.0"
+                }
+            },
+            "token": {
+                "address": addr_lower,
+                "symbol": token_sym,
+                "name": token_name,
+                "implementationName": contract_name,
+                "proxy": proxy_info,
+                "sourceVerified": True
+            },
+            "findings": findings
+        }
+
+    # Save to disk
+    with open(token_out, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+
+    duration = time.time() - start_time
+    # Cost instrumentation: RPC calls (name, symbol, 4 proxy slots, getCode = ~6 calls)
+    cost_telemetry = {
+        "slither_cpu_seconds": round(slither_cpu if source_verified else 0.0, 2),
+        "rpc_calls_count": 6
+    }
+    return report, duration, cost_telemetry

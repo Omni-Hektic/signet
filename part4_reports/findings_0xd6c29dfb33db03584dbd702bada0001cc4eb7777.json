@@ -2,7 +2,7 @@
   "auditMetadata": {
     "targetChain": "bsc",
     "chainId": 56,
-    "scanTimestamp": "2026-10-06T20:41:39.456890+00:00",
+    "scanTimestamp": "2026-10-07T20:59:27.885044+00:00",
     "analyzer": "bsc-sig-audit-v1",
     "status": "COMPLETED",
     "detectorVersions": {

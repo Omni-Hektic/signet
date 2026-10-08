@@ -1,0 +1,41 @@
+{
+  "auditMetadata": {
+    "targetChain": "bsc",
+    "chainId": 56,
+    "scanTimestamp": "2026-10-07T20:56:04.685449+00:00",
+    "analyzer": "bsc-sig-audit-v1",
+    "status": "COMPLETED",
+    "detectorVersions": {
+      "slither": "0.11.6",
+      "semgrep": "1.179.0",
+      "solc": "0.8.20",
+      "sig-01-slither": "v1.0",
+      "sig-03-semgrep": "v1.0"
+    }
+  },
+  "token": {
+    "address": "0x3783dcefe8811c1293cc0c71cb57109845490e06",
+    "symbol": "\u5e01\u5b89\u9f99\u867e",
+    "name": "Binance AI Agent",
+    "implementationName": "Unverified",
+    "marketCapUsd": 418076.1523,
+    "liquidityUsd": 50728.7367,
+    "proxy": {
+      "isProxy": false,
+      "type": null,
+      "implementation": null
+    },
+    "sourceVerified": false
+  },
+  "findings": [
+    {
+      "checkId": "UNVERIFIED_SOURCE",
+      "severity": "INFO",
+      "confidence": "LOW",
+      "status": "UNVERIFIED",
+      "title": "Contract source code is unverified",
+      "description": "The contract bytecode is deployed on BSC without verified source code on BscScan.",
+      "action": "MANUAL_REVIEW"
+    }
+  ]
+}
