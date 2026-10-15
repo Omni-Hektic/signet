@@ -31,7 +31,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import httpx
 from pydantic import BaseModel
-from fastapi import FastAPI, Query, Path, Response, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Path, Response, HTTPException, status, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, HTMLResponse
 
@@ -48,6 +48,7 @@ from api.card import (
 )
 from api.cache import cache_manager
 from api.scanner import execute_cold_audit, REPORTS_DIR
+from api.auth import require_api_key
 
 JOB_TTL_SECONDS = 3600  # 1 Hour TTL
 
@@ -315,6 +316,7 @@ def root_landing():
 <p><code>GET /v1/badge/&lt;address&gt;.svg</code> — returns an embeddable 180×28px status badge.</p>
 <h2>Scan Endpoint</h2>
 <p><code>GET /v1/scan/&lt;address&gt;</code> — returns a full audit verdict (cached or cold).</p>
+<p>Protected endpoints require an <code>X-API-Key</code> header. <a href="mailto:decarlofreelance@gmail.com">Contact us</a> to get a key.</p>
 </body></html>""")
 
 
@@ -331,7 +333,7 @@ def health_check():
         "warm_cache_entries": len(cache_manager)
     }
 
-@app.get("/v1/scan/{address}", tags=["Audit"])
+@app.get("/v1/scan/{address}", tags=["Audit"], dependencies=[Depends(require_api_key)])
 async def scan_token(
     address: str = Path(..., description="Target contract address (0x...)"),
     format: str = Query("json", description="Output format: json, telegram, terminal, or trading_bot"),
@@ -438,7 +440,7 @@ async def scan_token(
         media_type="application/json"
     )
 
-@app.get("/v1/jobs/{job_id}", tags=["Audit"])
+@app.get("/v1/jobs/{job_id}", tags=["Audit"], dependencies=[Depends(require_api_key)])
 def get_job_status(job_id: str = Path(..., description="Job identifier")):
     """Poll status of an asynchronous cold audit (1-hour TTL)."""
     prune_expired_jobs()
@@ -454,7 +456,7 @@ def get_job_status(job_id: str = Path(..., description="Job identifier")):
     job_copy["ttl_remaining_seconds"] = ttl_remaining
     return job_copy
 
-@app.get("/v1/card/{address}", tags=["Risk Card"])
+@app.get("/v1/card/{address}", tags=["Risk Card"], dependencies=[Depends(require_api_key)])
 def get_risk_card(
     address: str = Path(..., description="Target contract address"),
     format: str = Query("telegram", description="Card format: telegram, terminal, or json")
@@ -575,7 +577,7 @@ def get_presale_documentation():
         "badge_embed_format": '<a href="https://signet-api.fly.dev/methodology"><img src="https://signet-api.fly.dev/v1/badge/{token_address}.svg" width="180" height="28" /></a>'
     }
 
-@app.post("/v1/launchpad/presale", tags=["Launchpad Integration"])
+@app.post("/v1/launchpad/presale", tags=["Launchpad Integration"], dependencies=[Depends(require_api_key)])
 def register_presale_token(req: PresaleRegisterRequest):
     """Launchpad Presale Registration Hook.
     
@@ -633,7 +635,7 @@ def register_presale_token(req: PresaleRegisterRequest):
 # ---------------------------------------------------------------------------
 DB_CACHE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "audit_cache.db"))
 
-@app.get("/v1/feed/new-pairs", tags=["Feed"])
+@app.get("/v1/feed/new-pairs", tags=["Feed"], dependencies=[Depends(require_api_key)])
 def get_new_pairs_feed(
     canonical_only: bool = Query(True, description="Filter to canonical quote pairs (WBNB/USDT)"),
     min_liquidity_usd: float = Query(0.0, description="Minimum estimated liquidity in USD"),
@@ -727,19 +729,33 @@ def get_new_pairs_feed(
         raise HTTPException(status_code=500, detail=f"Feed database error: {e}")
 
 @app.websocket("/v1/feed/ws")
-async def websocket_feed_stream(websocket: WebSocket):
+async def websocket_feed_stream(
+    websocket: WebSocket,
+    api_key: Optional[str] = Query(default=None, alias="api_key")
+):
     """
     WebSocket Clean Pair Stream: Real-time, 15-block confirmed new BSC pairs
     with pre-resolved proxy implementations pushed at line rate (< 15ms).
-    
+
     Protocol:
-    - Connect to wss://[host]/v1/feed/ws
+    - Connect to wss://[host]/v1/feed/ws?api_key=<your-key>
     - Client can send: {"action": "subscribe", "filter": "canonical"} or {"action": "subscribe", "filter": "all"}
     - Client can send: {"action": "ping"} -> receives {"event": "pong"}
     - Server immediately pushes handshake + initial 5-pair snapshot
     - Server continuously pushes {"event": "new_pair", ...} as factory events are confirmed.
     """
+    from api.auth import AUTH_ENABLED, VALID_KEYS
     await websocket.accept()
+    # Validate key before doing any real work
+    if AUTH_ENABLED:
+        if not api_key or api_key not in VALID_KEYS:
+            await websocket.send_json({
+                "event": "error",
+                "code": "unauthorized",
+                "message": "Valid api_key query parameter required. Connect as wss://host/v1/feed/ws?api_key=<key>"
+            })
+            await websocket.close(code=4001)
+            return
     
     filter_canonical = True
     last_sent_index = 0
